@@ -12,7 +12,8 @@ def _simple_graph_snapshot_restoration(datapipe: IterDataPipe, n_iterations: int
     This function will restore a snapshot by fast-forwarding the given DataPipe by ``n_iterations``,
     and in the process, fast-forward its parent DataPipes as well at the cost of re-doing every computation.
     For instance, applying this function to the final DataPipe of a graph will restore the snapshot
-    (via fast-forward) every DataPipe within the graph.
+    (via fast-forward) every DataPipe within the graph. This can also be used on source nodes within DataPipe graph
+    with no input DataPipe.
 
     After you deserialize a DataPipe, you can use its `_number_of_samples_yielded` attribute as the input
     to this function to forward the DataPipe.
@@ -56,3 +57,18 @@ def _simple_graph_snapshot_restoration(datapipe: IterDataPipe, n_iterations: int
     # This will prevent the DataPipe from resetting in the `iter()` call
     # If another DataPipe is consuming it, it won't have to start over again
     datapipe._snapshot_state = _SnapshotState.Restored
+
+
+def _fast_forward_graph(datapipe: IterDataPipe, n_iterations: int) -> None:
+
+    # 1. Get a graph of the datapipe
+    # 2. Traverse from output toward source, label fast-forward strategy for each
+    # 2.a. If nothing is available for that node, use `simple_fast_forward_graph` up-to that point, you can stop there,
+    #      and mark that as source
+    # 3. Starting from the source, fast-forward each node down, assuming the inputs have been fast-forwarded properly.
+
+    # There are 3 fast-forwarding strategy
+    # 1. Source - fast-forward by
+    # 2. Stateless -
+    # 3. Stateful - restore buffer (may need custom fast-forward function)
+    pass

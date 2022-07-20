@@ -197,6 +197,13 @@ class IterDataPipe(IterableDataset[T_co], metaclass=_IterDataPipeMeta):
         """
         pass
 
+    def fast_forward(self, n_iterations: int) -> None:
+        r"""
+        Reset the DataPipe (which invalidates all iterators), then fast forward the state of `IterDataPipe`
+        by the given number of iterations relative to its initialized state.
+        """
+        pass
+
 
 class DFIterDataPipe(IterDataPipe):
     def _is_dfpipe(self):
