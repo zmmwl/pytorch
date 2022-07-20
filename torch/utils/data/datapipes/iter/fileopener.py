@@ -71,6 +71,12 @@ class FileOpenerIterDataPipe(IterDataPipe[Tuple[str, IOBase]]):
             raise TypeError("{} instance doesn't have valid length".format(type(self).__name__))
         return self.length
 
+    def save_snapshot(self):
+        pass  # Do nothing if previous DataPipe is properly restored
+
+    def restore_snapshot(self, snapshot=None):
+        pass
+
 
 class FileLoaderIterDataPipe(IterDataPipe[Tuple[str, IOBase]]):
 

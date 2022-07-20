@@ -63,6 +63,31 @@ class ConcaterIterDataPipe(IterDataPipe):
             self.length = -1
         return len(self)
 
+    def save_snapshot(self):
+        # TODO: This should be a pass if you assume the previous DPs' snapshots are correct
+        #       Otherwise, you need a buffer to save the outputs from `for data in dp:` in case it crashes
+        #       halfway through (e.g. 4 DPs, first 2 succeed, 3rd fails). Code might be like:
+        #       try:
+        #           for data in dp:
+        #               temp.append(data)
+        #           except SomeException:
+        #               # Remember which failed, start again from that one
+        #           # If no exception, proceed as normal
+        pass
+
+    def restore_snapshot(self, snapshot=None):
+        pass
+
+    # def __getstate__(self):
+    #     if IterDataPipe.getstate_hook is not None:
+    #         return IterDataPipe.getstate_hook(self)
+    #     state = (self.datapipes, self.length)
+    #     return state
+    #
+    # def __setstate__(self, state):
+    #     (self.datapipes, self.length) = state
+
+
 
 @functional_datapipe('fork')
 class ForkerIterDataPipe(IterDataPipe):
@@ -266,6 +291,13 @@ class _ChildDataPipe(IterDataPipe):
         Check the valid iterator ID against that of DataPipe object and that of `main_datapipe`.
         """
         return iterator_id == self._valid_iterator_id and iterator_id == self.main_datapipe._valid_iterator_id
+
+    def save_snapshot(self):
+        # TODO: Save buffer depending on self.main_datapipe type
+        pass
+
+    def restore_snapshot(self, snapshot=None):
+        pass
 
 
 @functional_datapipe('demux')
@@ -499,6 +531,12 @@ class MultiplexerIterDataPipe(IterDataPipe):
     def __del__(self):
         self.buffer.clear()
 
+    def save_snapshot(self):
+        pass
+
+    def restore_snapshot(self, snapshot=None):
+        pass
+
 
 @functional_datapipe('zip')
 class ZipperIterDataPipe(IterDataPipe[Tuple[T_co]]):
@@ -550,3 +588,18 @@ class ZipperIterDataPipe(IterDataPipe[Tuple[T_co]]):
         else:
             self.length = -1
         return len(self)
+
+    def save_snapshot(self):
+        pass
+
+    def restore_snapshot(self, snapshot=None):
+        pass
+
+    # def __getstate__(self):
+    #     if IterDataPipe.getstate_hook is not None:
+    #         return IterDataPipe.getstate_hook(self)
+    #     state = (self.datapipes, self.length)
+    #     return state
+    #
+    # def __setstate__(self, state):
+    #     (self.datapipes, self.length) = state

@@ -15,6 +15,7 @@ __all__ = [
 T_co = TypeVar('T_co', covariant=True)
 
 
+# TODO: Reimplement all Samplers as DataPipes
 class Sampler(Generic[T_co]):
     r"""Base class for all Samplers.
 

@@ -48,6 +48,12 @@ class ShardingFilterIterDataPipe(IterDataPipe):
                 (1 if (self.instance_id < len(self.source_datapipe) % self.num_of_instances) else 0)
         raise TypeError("{} instance doesn't have valid length".format(type(self).__name__))
 
+    def save_snapshot(self):
+        pass  # Do nothing if previous DataPipe is properly restored
+
+    def restore_snapshot(self, snapshot=None):
+        pass
+
 
 @functional_datapipe('batch')
 class BatcherIterDataPipe(IterDataPipe[DataChunk]):
@@ -111,6 +117,14 @@ class BatcherIterDataPipe(IterDataPipe[DataChunk]):
             return self.length
         raise TypeError("{} instance doesn't have valid length".format(type(self).__name__))
 
+    def save_snapshot(self):
+        # TODO: We may want to potentially change `batch` to `current_batch` and save it
+        #       in case some error occurs while __iter__ is midway through?
+        pass  # Do nothing if previous DataPipe is properly restored
+
+    def restore_snapshot(self, snapshot=None):
+        pass
+
 
 @functional_datapipe('unbatch')
 class UnBatcherIterDataPipe(IterDataPipe):
@@ -164,6 +178,14 @@ class UnBatcherIterDataPipe(IterDataPipe):
                         yield i
             else:
                 raise IndexError(f"unbatch_level {self.unbatch_level} exceeds the depth of the DataPipe")
+
+    def save_snapshot(self):
+        # TODO: Poor man's snapshotting
+        #       Need to know what the last known element is in __iter__ and how many have yielded since
+        pass
+
+    def restore_snapshot(self, snapshot=None):
+        pass
 
 
 @functional_datapipe('groupby')
