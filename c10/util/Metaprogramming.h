@@ -2,9 +2,15 @@
 
 #include <c10/util/Array.h>
 #include <c10/util/TypeList.h>
+#include <c10/util/TypeTraits.h>
+
 #include <array>
+#include <cstddef>
+#include <cstdint>
 #include <functional>
+#include <tuple>
 #include <type_traits>
+#include <utility>
 
 namespace c10 {
 namespace guts {
@@ -103,6 +109,7 @@ template <
     class Enable,
     class... Args>
 struct extract_arg_by_filtered_index_;
+
 template <
     template <class>
     class Condition,

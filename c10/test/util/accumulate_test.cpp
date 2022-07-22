@@ -2,8 +2,9 @@
 
 #include <c10/util/accumulate.h> // IWYU pragma: associated
 
-#include <gtest/gtest.h>
+#include <c10/util/Exception.h>
 
+#include <gtest/gtest.h>
 #include <list>
 #include <vector>
 

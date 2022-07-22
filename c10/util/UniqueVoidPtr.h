@@ -1,7 +1,9 @@
 #pragma once
-#include <memory>
-
 #include <c10/macros/Macros.h>
+
+#include <iosfwd>
+#include <memory>
+#include <utility>
 
 namespace c10 {
 

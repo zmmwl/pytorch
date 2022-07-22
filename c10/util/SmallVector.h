@@ -27,6 +27,7 @@
 #include <algorithm>
 #include <cassert>
 #include <cstddef>
+#include <cstdint>
 #include <cstdlib>
 #include <cstring>
 #include <functional>
@@ -35,6 +36,7 @@
 #include <limits>
 #include <memory>
 #include <new>
+#include <ostream>
 #include <type_traits>
 #include <utility>
 

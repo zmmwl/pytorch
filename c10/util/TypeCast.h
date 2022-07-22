@@ -2,7 +2,9 @@
 #include <c10/macros/Macros.h>
 #include <c10/util/BFloat16.h>
 #include <c10/util/Half.h>
+#include <c10/util/complex.h>
 
+#include <cstdint>
 #include <type_traits>
 
 C10_CLANG_DIAGNOSTIC_PUSH()

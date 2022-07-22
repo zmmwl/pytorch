@@ -6,6 +6,7 @@
 #include <c10/util/StringUtil.h>
 
 #include <cstddef>
+#include <cstdint>
 #include <exception>
 #include <ostream>
 #include <sstream>

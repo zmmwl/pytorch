@@ -1,5 +1,7 @@
 #include <c10/util/Type.h> // IWYU pragma: associated
 
+#include <c10/macros/Macros.h>
+
 #include <cstdlib>
 #include <functional>
 #include <memory>
@@ -7,7 +9,6 @@
 #if HAS_DEMANGLE
 
 #include <cxxabi.h>
-#include <execinfo.h>
 
 namespace c10 {
 

@@ -16,8 +16,12 @@
 
 #include <c10/util/SmallVector.h>
 
+#include <c10/macros/Macros.h>
+
 #include <cstdint>
 #include <stdexcept>
+#include <string>
+
 using namespace c10;
 
 // Check that no bytes are wasted and everything is well-aligned.

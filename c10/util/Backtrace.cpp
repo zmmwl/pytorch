@@ -4,6 +4,7 @@
 #include <c10/util/Type.h>
 #include <c10/util/irange.h>
 
+#include <cstdlib>
 #include <functional>
 #include <memory>
 #include <sstream>
@@ -12,12 +13,13 @@
 
 #ifdef _MSC_VER
 #include <c10/util/win32-headers.h>
+
 #include <iomanip>
+
 #pragma comment(lib, "Dbghelp.lib")
 #endif
 
 #if SUPPORTS_BACKTRACE
-#include <cxxabi.h>
 #ifdef C10_ANDROID
 #include <dlfcn.h>
 #include <unwind.h>

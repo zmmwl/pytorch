@@ -6,6 +6,7 @@
 #include <c10/util/string_view.h>
 
 #include <cstddef>
+#include <cstdint>
 #include <ostream>
 #include <sstream>
 #include <string>

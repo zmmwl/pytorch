@@ -1,23 +1,21 @@
 #include <c10/util/signal_handler.h>
 
 #include <c10/util/Backtrace.h>
+#include <c10/util/Logging.h>
+
+#include <syscall.h>
+#include <cstdint>
+#include <string>
 
 #if defined(C10_SUPPORTS_SIGNAL_HANDLER)
 
 // Normal signal handler implementation.
-#include <cxxabi.h>
 #include <dirent.h>
-#include <dlfcn.h>
 #include <fmt/format.h>
-#include <sys/syscall.h>
-#include <sys/types.h>
 #include <unistd.h>
-#include <unwind.h>
-
 #include <cstdio>
 #include <cstdlib>
 #include <iostream>
-#include <unordered_set>
 
 #ifdef C10_ANDROID
 #ifndef SYS_gettid

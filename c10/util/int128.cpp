@@ -34,9 +34,10 @@
 #include <c10/util/int128.h>
 
 #include <c10/util/Logging.h>
+
 #include <iomanip>
 #include <ostream> // NOLINT(readability/streams)
-#include <sstream>
+#include <string>
 
 namespace c10 {
 

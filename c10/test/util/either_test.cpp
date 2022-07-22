@@ -3,9 +3,12 @@
 #include <c10/util/either.h> // IWYU pragma: associated
 
 #include <c10/macros/Macros.h>
+
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
-#include <sstream>
+#include <algorithm>
+#include <functional>
+#include <tuple>
 #include <vector>
 
 using c10::either;

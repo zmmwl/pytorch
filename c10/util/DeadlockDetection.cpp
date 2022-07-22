@@ -1,5 +1,7 @@
 #include <c10/util/DeadlockDetection.h>
 
+#include <c10/util/Exception.h>
+
 #include <cstdlib>
 
 namespace c10 {

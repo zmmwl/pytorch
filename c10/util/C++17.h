@@ -3,6 +3,8 @@
 #define C10_UTIL_CPP17_H_
 
 #include <c10/macros/Macros.h>
+
+#include <array>
 #include <cstdlib>
 #include <functional>
 #include <memory>

@@ -29,17 +29,19 @@
 
 #include <c10/macros/Macros.h>
 #include <c10/util/ArrayRef.h>
+#include <c10/util/Metaprogramming.h>
+#include <c10/util/SmallVector.h>
 #include <c10/util/in_place.h> // IWYU pragma: export
 
 #include <cassert>
+#include <cstring>
 #include <functional>
 #include <initializer_list>
+#include <new>
 #include <stdexcept>
 #include <string>
 #include <type_traits>
 #include <utility>
-
-#include <c10/util/Metaprogramming.h>
 
 C10_CLANG_DIAGNOSTIC_PUSH()
 #if C10_CLANG_HAS_WARNING("-Wstring-conversion")
@@ -63,7 +65,6 @@ namespace c10 {
 // 20.5.4, optional for object types
 template <class T>
 class optional;
-
 // 20.5.5, optional for lvalue reference types
 template <class T>
 class optional<T&>;
