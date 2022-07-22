@@ -13,20 +13,12 @@
 #include <c10/util/C++17.h>
 #include <c10/util/TypeSafeSignMath.h>
 #include <c10/util/complex.h>
-#include <type_traits>
-
-#if defined(__cplusplus) && (__cplusplus >= 201103L)
-#include <cmath>
-#include <cstdint>
-#elif !defined(__OPENCL_VERSION__)
-#include <math.h>
-#include <stdint.h>
-#endif
 
 #ifdef _MSC_VER
 #include <intrin.h>
 #endif
 
+#include <cmath>
 #include <complex>
 #include <cstdint>
 #include <cstring>
@@ -35,6 +27,7 @@
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <type_traits>
 #include <utility>
 
 #ifdef __CUDACC__
@@ -542,4 +535,4 @@ C10_API std::ostream& operator<<(std::ostream& out, const Half& value);
 
 } // namespace c10
 
-#include <c10/util/Half-inl.h> // IWYU pragma: keep
+#include <c10/util/Half-inl.h> // IWYU pragma: export

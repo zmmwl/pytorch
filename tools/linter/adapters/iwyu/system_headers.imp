@@ -11,6 +11,7 @@
     { include: [ "<bits/std_function.h>", private, "<functional>", public ] },
     { include: [ "<ext/alloc_traits.h>", private, "<memory>", public ] },
 
-    # { symbol: [ "size_t", private, "<cstddef>", public ] },
-    # { symbol: [ "ptrdiff_t", private, "<cstddef>", public ] },
+    # IWYU sometimes includes hash from the wrong file, since it's
+    # forward declared in many different standard headers
+    { symbol: [ "std::hash", private, "<functional>", public ] },
 ]
