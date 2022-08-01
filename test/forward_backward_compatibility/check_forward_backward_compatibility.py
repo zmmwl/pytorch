@@ -78,6 +78,7 @@ ALLOW_LIST = [
     ("aten::linalg_slogdet.out", datetime.date(2022, 8, 1)),
     ("aten::_linalg_solve", datetime.date(2022, 10, 1)),
     ("aten::_linalg_solve.solution", datetime.date(2022, 10, 1)),
+    ("aten::_convolution", datetime.date(2023, 12, 31)),
     ("aten::solve", datetime.date(9999, 1, 1)),
     ("aten::solve.solution", datetime.date(9999, 1, 1)),
     ("aten::_solve_helper", datetime.date(9999, 1, 1)),
