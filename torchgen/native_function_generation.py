@@ -342,6 +342,7 @@ def generate_function(
             # which NativeFunction objects did not come directly from native_functions.yaml.
             tags=set(["generated"]),
             namespace=f.namespace,
+            composite=(set(), set()),
         ),
         backend_metadata,
     )

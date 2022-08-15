@@ -309,6 +309,7 @@ def get_aten_generated_files(enabled_backends):
         "RegisterCompositeImplicitAutograd.cpp",
         "RegisterCompositeExplicitAutograd.cpp",
         "RegisterCompositeExplicitAutogradNonFunctional.cpp",
+        "DispatchlessCompositeExplicitAutograd.cpp",
         "CompositeViewCopyKernels.cpp",
         "RegisterSchema.cpp",
         "Declarations.yaml",
@@ -355,22 +356,40 @@ def get_aten_generated_files(enabled_backends):
         res[file_name] = [file_name]
     return res
 
+# torchgen eventually will probably generate "dispatchless" composite code
+# for the same set of backends as the USED_PT_BACKENDS list defined above,
+# but it does not today.
+PT_DISPATCHLESS_CODEGEN_BACKENDS = [
+    "Meta",
+    "CPU",
+    "CUDA",
+    "CompositeExplicitAutograd",
+]
+
 def get_aten_derived_type_src_rules(aten_rule_name, enabled_backends):
     return [
         ":{}[{}]".format(aten_rule_name, "Register" + backend + ".cpp")
         for backend in enabled_backends
+    ] + [
+        ":{}[{}]".format(aten_rule_name, "Dispatchless" + backend + ".cpp")
+        for backend in enabled_backends
+        if backend in PT_DISPATCHLESS_CODEGEN_BACKENDS
     ]
 
 def get_aten_selective_cpp_rules(aten_rule_name, enabled_backends):
     return [
         ":{}[{}]".format(aten_rule_name, f)
-        for f in ["RegisterCompositeImplicitAutograd.cpp", "RegisterCompositeExplicitAutograd.cpp", "RegisterCompositeExplicitAutogradNonFunctional.cpp", "RegisterSchema.cpp", "RegisterBackendSelect.cpp", "CompositeViewCopyKernels.cpp"]
+        for f in ["RegisterCompositeImplicitAutograd.cpp", "RegisterCompositeExplicitAutograd.cpp", "RegisterCompositeExplicitAutogradNonFunctional.cpp", "DispatchlessCompositeExplicitAutograd.cpp", "RegisterSchema.cpp", "RegisterBackendSelect.cpp", "CompositeViewCopyKernels.cpp"]
     ] + get_aten_derived_type_src_rules(aten_rule_name, enabled_backends)
 
 def get_aten_derived_type_srcs(enabled_backends):
     return [
         "Register" + derived_type + ".cpp"
         for derived_type in enabled_backends
+    ] + [
+        "Dispatchless" + derived_type + ".cpp"
+        for derived_type in enabled_backends
+        if derived_type in PT_DISPATCHLESS_CODEGEN_BACKENDS
     ] + [
         derived_type + "Functions.h"
         for derived_type in enabled_backends

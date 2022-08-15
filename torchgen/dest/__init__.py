@@ -1,3 +1,4 @@
+from .dispatchless import DispatchlessComposite as DispatchlessComposite
 from .lazy_ir import (
     generate_non_native_lazy_ir_nodes as generate_non_native_lazy_ir_nodes,
     GenLazyIR as GenLazyIR,

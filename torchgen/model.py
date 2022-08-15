@@ -203,6 +203,12 @@ for fk in FUNCTIONALITY_KEYS:
 
 STRUCTURED_DISPATCH_KEYS = {DispatchKey.MPS, DispatchKey.CUDA, DispatchKey.CPU}
 UFUNC_DISPATCH_KEYS = {DispatchKey.CUDA, DispatchKey.CPU}
+COMPOSITE_DISPATCH_KEYS = {
+    DispatchKey.Meta,
+    DispatchKey.CUDA,
+    DispatchKey.CPU,
+    DispatchKey.CompositeExplicitAutograd,
+}
 
 # Set of supported dispatch keys
 dispatch_keys = [
@@ -492,6 +498,16 @@ class NativeFunction:
     # That aren't easily inferrable directly from the operator's schema.
     tags: Set[str]
 
+    # Information needed to generate dispatch-less kernels.
+    #     1. Kernel names (+ overloads) that this NativeFunction depends on. This
+    #        set will be used for generating struct methods for by-passing the
+    #        dispatcher.
+    #
+    #     2. DispatchKeys that the codegen should generate for. There might be
+    #        kernels are composite, but also have a specialized dispatch for CPU
+    #        (or some other backend supported by dispatch-less composites).
+    composite: Tuple[Set["OperatorName"], Set[DispatchKey]]
+
     # NB: The benefit of defining a dataclass is that we automatically get
     # a constructor defined for all the fields we specify.  No need
     # to explicitly write it out.
@@ -616,7 +632,15 @@ class NativeFunction:
                     raise AssertionError(f"illegal tag {t}")
         assert isinstance(tags, set)
 
-        from torchgen.api import cpp
+        composite_kernels_s = e.pop("composite", None)
+        assert composite_kernels_s is None or isinstance(composite_kernels_s, str)
+        composite_kernels = (
+            set(OperatorName.parse(c.strip()) for c in composite_kernels_s.split(","))
+            if composite_kernels_s is not None
+            else set()
+        )
+
+        from torchgen.api import cpp, dispatchless
 
         raw_dispatch = e.pop("dispatch", None)
         assert raw_dispatch is None or isinstance(raw_dispatch, dict), e
@@ -673,7 +697,11 @@ class NativeFunction:
                 f"but got {dispatch[DispatchKey.CompositeImplicitAutograd]}.  Rename your implementation to the expected "
                 "name, then delete the dispatch table"
             )
-        elif not structured and structured_delegate is None:
+        elif (
+            not structured
+            and structured_delegate is None
+            and len(composite_kernels) == 0
+        ):
             name = str(func.name.name)
             assert not (
                 name.startswith("new_")
@@ -714,6 +742,19 @@ class NativeFunction:
             []
             if autogen_str == ""
             else [OperatorName.parse(x) for x in autogen_str.split(", ")]
+        )
+
+        assert not (structured and len(composite_kernels) > 0), (
+            "structured kernels do not support dispatch-less composite kernel calls, yet. "
+            "Since this kernel is already structure, remove the composite listing."
+        )
+
+        assert not (
+            len(composite_kernels) > 0
+            and DispatchKey.CompositeExplicitAutograd in dispatch.keys()
+        ), (
+            "dispatch-less composite kernels implies in CompositeExplicitAutograd. "
+            "Remove it from the dispatch."
         )
 
         raw_ufunc_inner_loop = e.pop("ufunc_inner_loop", {})
@@ -787,6 +828,25 @@ class NativeFunction:
                     "(it is delegated!)"
                 )
 
+        # build the set of dispatch keys for which we should generate dispatch-less
+        # kernels. Then, create BackendMetadata for each of them, so that their
+        # registration is generated seamlessly.
+        if len(composite_kernels) > 0:
+            composite_dispatch_keys = {
+                k for k in COMPOSITE_DISPATCH_KEYS if k not in dispatch
+            }
+
+            for dispatch_key in composite_dispatch_keys:
+                backend_metadata[dispatch_key] = {
+                    func.name: BackendMetadata(
+                        dispatchless.kernel(func, dispatch_key),
+                        structured=False,
+                        cpp_namespace=DEFAULT_KERNEL_NAMESPACE,
+                    )
+                }
+        else:
+            composite_dispatch_keys = set()
+
         return (
             NativeFunction(
                 func=func,
@@ -812,6 +872,7 @@ class NativeFunction:
                 has_composite_explicit_autograd_non_functional_kernel=has_composite_explicit_autograd_non_functional_kernel,
                 tags=tags,
                 namespace=namespace,
+                composite=(composite_kernels, composite_dispatch_keys),
             ),
             backend_metadata,
         )
