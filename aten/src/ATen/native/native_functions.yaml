@@ -4656,9 +4656,10 @@
   device_check: NoCheck
   device_guard: False
   dispatch:
+    # NOTE: The implementation of split_with_sizes bypasses the dispatcher to call this; undo
+    # that if adding specific implementations here!
     CompositeExplicitAutograd: slice
-# NOTE: The implementation of split_with_sizes bypasses the dispatcher to call this; undo
-# that if adding specific implementations here!
+    NestedTensorCPU, NestedTensorCUDA: slice_nested
 
 - func: slice_backward(Tensor grad_output, int[] input_sizes, int dim, int start, int end, int step) -> Tensor
   variants: function
@@ -4753,7 +4754,7 @@
   device_check: NoCheck
   device_guard: False
   dispatch:
-    CompositeExplicitAutograd: split
+    CompositeExplicitAutograd, NestedTensorCPU, NestedTensorCUDA: split
 
 - func: split.sizes(Tensor(a -> *) self, int[] split_size, int dim=0) -> Tensor(a)[]
   variants: function, method
@@ -4772,7 +4773,7 @@
   device_check: NoCheck
   device_guard: False
   dispatch:
-    CompositeExplicitAutograd: split_with_sizes
+    CompositeExplicitAutograd, NestedTensorCPU, NestedTensorCUDA: split_with_sizes
 
 - func: hsplit.int(Tensor(a -> *) self, int sections) -> Tensor(a)[]
   variants: function, method
