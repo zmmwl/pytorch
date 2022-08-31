@@ -254,6 +254,67 @@ Tensor qkv_projection(
   return qkv;
 }
 
+// Returns tuple of (query, key, bias) after projection.
+std::tuple<Tensor, Tensor, Tensor> packed_qkv_projection(
+    const Tensor& query,
+    const Tensor& key,
+    const Tensor& value,
+    const Tensor& qkv_weight,
+    const c10::optional<Tensor>& qkv_bias) {
+  // shape: [B, T, 3 x D]
+  std::tuple<Tensor, Tensor, Tensor> q_k_v;
+  if (key.is_same(value)) {
+    if (query.is_same(key)) {
+      // self-attention
+      auto parts = at::linear(query, qkv_weight, qkv_bias).chunk(3, /*dim=*/ -1);
+      q_k_v = std::make_tuple(parts[0], parts[1], parts[2]);
+    } else {
+      // encoder-decoder attention
+      const auto embed_dim = query.size(-1);
+      auto q_kv_weight_s =
+          at::native::split_with_sizes(qkv_weight, {embed_dim, embed_dim * 2}, 0);
+      std::vector< c10::optional<Tensor> > q_kv_bias_s(3, c10::nullopt);
+      if (qkv_bias.has_value()) {
+          auto bias_parts = at::native::split_with_sizes(*qkv_bias, {embed_dim, embed_dim * 2}, 0);
+          q_kv_bias_s = {bias_parts[0], bias_parts[1]};
+      }
+      TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+          q_kv_weight_s.size() == 2,
+          "expected split to produce 2 tensors but it produced ",
+          q_kv_weight_s.size());
+      TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+          q_kv_bias_s.size() == 2,
+          "expected split to produce 2 tensors but it produced ",
+          q_kv_bias_s.size());
+      auto q = at::linear(query, q_kv_weight_s[0], q_kv_bias_s[0]);
+      auto kv = at::linear(key, q_kv_weight_s[1], q_kv_bias_s[1]);
+      auto k_v = kv.chunk(2, /*dim=*/ -1);
+      q_k_v = std::make_tuple(q, k_v[0], k_v[1]);
+    }
+  } else {
+    auto q_k_v_weight_s = at::native::chunk(qkv_weight, 3, 0);
+    std::vector< c10::optional<Tensor> > q_k_v_bias_s(3, c10::nullopt);
+    if (qkv_bias.has_value()) {
+        auto bias_parts = at::native::chunk(*qkv_bias, 3, 0);
+        q_k_v_bias_s = {bias_parts[0], bias_parts[1], bias_parts[2]};
+    }
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+        q_k_v_weight_s.size() == 3,
+        "expected chunk to produce 3 tensors but it produced ",
+        q_k_v_weight_s.size());
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+        q_k_v_bias_s.size() == 3,
+        "expected chunk to produce 3 tensors but it produced ",
+        q_k_v_bias_s.size());
+    auto q = at::linear(query, q_k_v_weight_s[0], q_k_v_bias_s[0]);
+    auto k = at::linear(key, q_k_v_weight_s[1], q_k_v_bias_s[1]);
+    auto v = at::linear(value, q_k_v_weight_s[2], q_k_v_bias_s[2]);
+    q_k_v = std::make_tuple(q, k, v);
+  }
+
+  return q_k_v;
+}
+
 } // namespace
 
 // compute q = (q + q_bias) / sqrt(dim_per_head), k = k + k_bias, v = v + v_bias
@@ -312,6 +373,7 @@ std::tuple<Tensor, Tensor, Tensor> transform_bias_rescale_qkv_cpu(
   return std::make_tuple(q_k_v_s[0], q_k_v_s[1], q_k_v_s[2]);
 }
 
+// Note: mask is a key_padding_mask; expected shape (B, T)
 std::tuple<Tensor, Tensor> native_multi_head_attention(
     const Tensor& query,
     const Tensor& key,
@@ -379,102 +441,45 @@ std::tuple<Tensor, Tensor> native_multi_head_attention(
       "expected `qkv_bias` first dim and first dim of query to be equal");
   TORCH_CHECK(D % num_head == 0, "`embed_dim` must divide evenly by `num_heads`");
 
-#ifndef NDEBUG
-  const auto B = query.is_nested()
-      ? get_nested_tensor_impl(query)->get_nested_size_tensor().size(0)
-      : query.sizes()[0];
-  auto T = query.is_nested() ? 0 : query.sizes()[1];
+  if (query.numel() == 0 || key.numel() == 0 || value.numel() == 0) {
+      // TODO: Make this unconditional when NT supports empty_like.
+      auto empty_output = query.is_nested() ? Tensor() : at::empty_like(query);
+      return std::make_tuple(empty_output, Tensor());
+  }
+
+  const auto B = query.size(0);
   const auto dim_per_head = D / num_head;
-#endif
 
   // shape: [B, T, 3 x D]
-  auto qkv = qkv_projection(query, key, value, embed_dim, qkv_weight);
+  Tensor q, k, v;
+  std::tie(q, k, v) = packed_qkv_projection(query, key, value, qkv_weight, qkv_bias);
+  q = q.reshape({B, -1, num_head, dim_per_head}).transpose(1, 2).contiguous();
+  k = k.reshape({B, -1, num_head, dim_per_head}).transpose(1, 2).contiguous();
+  v = v.reshape({B, -1, num_head, dim_per_head}).transpose(1, 2).contiguous();
 
-  if (!qkv.is_nested() && qkv.numel() == 0) {
-    if (query.is_nested()) {
-      return std::make_tuple(Tensor(), Tensor());
-    }
-    return std::make_tuple(at::empty_like(query), Tensor());
+  Tensor attn_output, attn_weights;
+  // convert key_padding_mask -> general attn_mask
+  c10::optional<Tensor> attn_mask;
+  if (mask.has_value()) {
+      // take mask from (B, T) -> (B, 1, 1, T) to match 4D inputs in (B, num_head, T, T) format
+      // Note: SDP has opposite masking semantics
+      attn_mask = (mask->dim() == 2 ? mask->unsqueeze(1).unsqueeze(1) : *mask).logical_not();
   }
+  std::tie(attn_output, attn_weights) = at::_scaled_dot_product_attention(
+          q, k, v, attn_mask, /*dropout=*/ 0.0, /*need_attn_weights=*/ need_weights);
 
-#ifndef NDEBUG
-  if (!query.is_nested() || !qkv.is_nested()) {
-    if (query.is_nested()) {
-      T = qkv.size(1);
-    }
-    debug_assert_shape(__LINE__, qkv, {B, T, 3 * D});
-  }
-#endif
+  // Convert attn_output from shape [B, num_head, T, dim_per_head] -> [B, T, D]
+  attn_output = attn_output.transpose(1, 2).contiguous().reshape({B, -1, D});
+  auto proj = at::linear(attn_output, proj_weight, proj_bias);
 
-#ifdef DEBUG_PRINT_EACH_STEP
-  if (!qkv.is_nested()) {
-    std::cerr << "qkv: " << qkv << std::endl;
-  }
-#endif
-  // shape: 3 x [B, num_head, T, dim_per_head]
-  auto q_k_v = _transform_bias_rescale_qkv(qkv, qkv_bias, num_head);
-  qkv = Tensor(); // Not used any more, allow free
-  auto& q = std::get<0>(q_k_v);
-  const auto& k = std::get<1>(q_k_v);
-  const auto& v = std::get<2>(q_k_v);
-#ifndef NDEBUG
-  debug_assert_shape(__LINE__, q, {B, num_head, T, dim_per_head});
-  debug_assert_shape(__LINE__, k, {B, num_head, T, dim_per_head});
-  debug_assert_shape(__LINE__, v, {B, num_head, T, dim_per_head});
-#endif
-#ifdef DEBUG_PRINT_EACH_STEP
-  std::cerr << "q: " << q << std::endl;
-  std::cerr << "k: " << k << std::endl;
-  std::cerr << "v: " << v << std::endl;
-#endif
-
-  // shape: [B, num_head, T, T]
-  auto qkt = bmm_nt(q, k);
-  // q & k are dead but cannot be freed because they were packed with v
-#ifndef NDEBUG
-  debug_assert_shape(__LINE__, qkt, {B, num_head, T, T});
-#endif
-#ifdef DEBUG_PRINT_EACH_STEP
-  std::cerr << "qkt: " << qkt << std::endl;
-#endif
-
-  // shape: [B, num_head, T, T]
-  // TODO: long-term, have a kernel that works with
-  // NestedTensor directly if there is no mask passed
-  qkt = masked_softmax(qkt, mask, query, mask_type);
-#ifdef DEBUG_PRINT_EACH_STEP
-  std::cerr << "qkt after softmax: " << qkt << std::endl;
-#endif
-
-  // shape: [B, num_head, T, dim_per_head]
-  // reuse storage for q; we're done with it
-  auto attn_ctx = bmm_nn(q, qkt, v);
-  // qkv is not dead; we just reused storage for q!
-  if (!need_weights) {
-    qkt = Tensor();
-  }
-#ifndef NDEBUG
-  debug_assert_shape(__LINE__, attn_ctx, {B, num_head, T, dim_per_head});
-#endif
-#ifdef DEBUG_PRINT_EACH_STEP
-  std::cerr << "attn_ctx: " << attn_ctx << std::endl;
-#endif
-
-  // shape: [B, T, D]
-  // Fuse transform_0213 inside
-  auto proj = transform0213_gemm_nt_bias(
-      attn_ctx, proj_weight, proj_bias, query);
-#ifndef NDEBUG
-  debug_assert_shape(__LINE__, proj, {B, T, D});
-#endif
   if (need_weights && average_attn_weights) {
     // weights are not needed for full transformer, so don't worry too
     // much about performance -- we implement this just to make use
     // cases that don't disable need_weights still get some speedup.
-    qkt = qkt.sum(1);
-    qkt /= num_head;
+    attn_weights = attn_weights.sum(1);
+    attn_weights /= num_head;
   }
-  return std::make_tuple(std::move(proj), std::move(qkt));
+  return std::make_tuple(std::move(proj), std::move(attn_weights));
 }
 
 std::tuple<Tensor, Tensor, Tensor, Tensor> native_decoder_only_multi_head_attention(

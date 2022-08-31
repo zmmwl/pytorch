@@ -689,17 +689,38 @@ Tensor select_nested(const Tensor& self, int64_t dim, int64_t index) {
 Tensor clone_nested(
     const Tensor& self,
     c10::optional<c10::MemoryFormat> optional_memory_format) {
-  auto memory_format = optional_memory_format.value_or(MemoryFormat::Preserve);
-  TORCH_CHECK(
-      memory_format == MemoryFormat::Preserve,
-      "clone_nested only supports memory format Preserve, but got ",
-      memory_format,
-      " instead.");
-  // TODO: The size doesn't necessarily need to be cloned, but it is more
-  // conservative. This is something we could revisit once we land a more
-  // efficient implementation of nested_size_tensor_.
-  return wrap_buffer(
-      get_buffer(self).clone(), get_nested_size_tensor(self).clone());
+  auto memory_format = optional_memory_format.value_or(c10::MemoryFormat::Preserve);
+  auto self_ptr = get_nested_tensor_impl(self);
+  if (memory_format == c10::MemoryFormat::Preserve ||
+  (memory_format == c10::MemoryFormat::Contiguous && nested_tensor_impl_is_contiguous(self_ptr))) {
+    const Tensor& buffer = self_ptr->get_buffer(),
+        sizemat = self_ptr->get_nested_size_tensor(),
+        stridemat = self_ptr->get_nested_stride_tensor();
+    const std::vector<int64_t>& offsets = self_ptr->get_offsets();
+    // TODO: The size and the stride do not necessarily need to be cloned,
+    //       but it is more conservative.
+    //       This is something we could revisit once we land a more
+    //       efficient implementation of nested_size_tensor_ and nested_stride_tensor.
+    return wrap_buffer(buffer.clone(), sizemat.clone(), stridemat.clone(), std::vector<int64_t>(offsets));
+  }
+  // actually, memory format is contiguous and self is noncontiguous
+  else if (memory_format == c10::MemoryFormat::Contiguous) {
+    const Tensor& self_buffer = self_ptr->get_buffer(),
+        sizemat = self_ptr->get_nested_size_tensor();
+    // TODO: use self.empty_like() rather than self.new_empty(self.sizes())
+    //       once nested-tensor empty_like comes out
+    Tensor output_buffer = self_buffer.new_empty(self_buffer.sizes());
+    Tensor output = wrap_buffer(output_buffer, sizemat);
+    std::vector<Tensor> self_unbind = self.unbind(),
+        output_unbind = output.unbind();
+    for (int64_t i = 0; i < self_ptr->size(0); i++) {
+      output_unbind[i].copy_(self_unbind[i]);
+    }
+    return output;
+  }
+  else {
+    AT_ERROR("nested tensor clone supports Preserve and Contiguous memory foramts");
+  }
 }
 
 at::Tensor NestedTensor_get_nested_size_tensor(const at::Tensor& self){
