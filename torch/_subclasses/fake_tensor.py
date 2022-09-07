@@ -15,7 +15,7 @@ from torch.fx.operator_schemas import normalize_function
 from torch.multiprocessing.reductions import StorageWeakRef
 from torch.overrides import TorchFunctionMode
 from torch.utils._mode_utils import no_dispatch
-from torch.utils._python_dispatch import enable_torch_dispatch_mode, TorchDispatchMode
+from torch.utils._python_dispatch import TorchDispatchMode
 
 from torch.utils._pytree import PyTree, tree_flatten, tree_map
 
@@ -553,7 +553,7 @@ class FakeTensor(torch.Tensor):
                 else:
                     assert fake_mode is arg.fake_mode, "Mixing modes NYI"
 
-        with enable_torch_dispatch_mode(fake_mode):
+        with contextlib.nullcontext() if not fake_mode else fake_mode.restore():
             return func(*args, **kwargs)
 
     @staticmethod
