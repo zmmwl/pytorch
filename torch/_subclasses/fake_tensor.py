@@ -553,7 +553,7 @@ class FakeTensor(torch.Tensor):
                 else:
                     assert fake_mode is arg.fake_mode, "Mixing modes NYI"
 
-        with contextlib.nullcontext() if not fake_mode else fake_mode.restore():
+        with contextlib.nullcontext() if not fake_mode else fake_mode:  # type: ignore[attr-defined]
             return func(*args, **kwargs)
 
     @staticmethod
@@ -733,7 +733,7 @@ class FakeTensorMode(TorchDispatchMode):
                         "It's likely that this is from calling tensor.shape in C++"
                     )
 
-            with self.restore():
+            with self:
                 if func in meta_table:
                     r = meta_table[func](*args, **kwargs)
                     return r
@@ -755,7 +755,7 @@ class FakeTensorMode(TorchDispatchMode):
             and len(flat_arg_tensors) != 0
             and hasattr(func, "prim_meta_impl")
         ):
-            with self.restore():
+            with self:
                 return func.prim_meta_impl(*args, **kwargs)
 
         if has_symbolic_sizes:

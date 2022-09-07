@@ -175,7 +175,7 @@ def generate_cct_and_mode(enable_recursive_torch_dispatch=False,
             modes = tuple(e.mode for e in all_args if isinstance(e, CompositeCompliantTensor))
             if not all_same_mode(modes):
                 raise RuntimeError("Multiple CompositeCompliantTensorModes NYI")
-            with modes[0].restore():
+            with modes[0]:
                 return func(*args, **kwargs)
 
     class CompositeCompliantTensorMode(TorchDispatchMode):

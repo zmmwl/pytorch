@@ -17,7 +17,7 @@ import inspect
 from dataclasses import dataclass
 import weakref
 
-from torch.utils._python_dispatch import TorchDispatchMode
+from torch.utils._python_dispatch import TorchDispatchMode, _pop_mode_temporarily
 from torch._subclasses import FakeTensor
 from .symbolic_shapes import ShapeEnv, SymDispatchMode, PySymInt, PySymFloat
 import torch.fx.experimental.symbolic_shapes as symbolic_shapes
@@ -157,8 +157,7 @@ def maybe_disable_fake_tensor_mode():
     # library
     mb_fake_mode = torch._C._get_torch_dispatch_mode()
     if isinstance(mb_fake_mode, FakeTensorMode):
-        # TODO: this is a nasty hack of an API that shouldn't be exposed, remove once we're using new mode stock
-        return mb_fake_mode._enable_inner_torch_dispatch_mode()
+        return _pop_mode_temporarily()
     else:
         return nullcontext()
 
@@ -427,7 +426,7 @@ class ProxyTorchDispatchMode(TorchDispatchMode):
     @contextmanager
     def restore(self):
         with self.sym_mode.enable(True):
-            with super().restore():
+            with self:
                 yield
 
     def inner_torch_dispatch(self, func, types, args=(), kwargs=None):
@@ -601,11 +600,6 @@ def make_fx(f, decomposition_table=None, tracing_mode="real"):
             "real": lambda x: x,
             "fake": wrap_fake_concrete,
         }
-        with fake_tensor_mode:
-            pass  # fake tensor mode needed w/ correct ancestors needed to wrap input tensors
-
-        def maybe_restore_fake_tensor_mode():
-            return fake_tensor_mode if isinstance(fake_tensor_mode, nullcontext) else fake_tensor_mode.restore()
 
         if tracing_mode == "symbolic":
             flat_shapes = shape_env.create_shapes_for_args(args)
@@ -623,7 +617,7 @@ def make_fx(f, decomposition_table=None, tracing_mode="real"):
 
         # We disable the autocast cache as the autocast cache causes type conversions on parameters to
         # check a cache, which introduces untracked tensors into the graph
-        with decompose(decomposition_table), maybe_restore_fake_tensor_mode(), \
+        with decompose(decomposition_table), fake_tensor_mode, \
              sym_mode, proxy_mode, disable_autocast_cache():  # type: ignore[attr-defined]
             t = dispatch_trace(wrap_key(func, args, fx_tracer), tracer=fx_tracer, concrete_args=tuple(phs))
 
@@ -635,12 +629,7 @@ def make_fx(f, decomposition_table=None, tracing_mode="real"):
 
 
 def get_torch_dispatch_modes():
-    modes = [torch._C._get_torch_dispatch_mode()]
-    if modes[-1] is None:
-        return list()
-    while modes[-1].inner is not None:
-        modes.append(modes[-1].inner)
-    return modes
+    return torch.utils._python_dispatch._cur_torch_dispatch_mode + [torch._C._get_torch_dispatch_mode()]
 
 
 @contextlib.contextmanager

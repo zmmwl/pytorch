@@ -70,7 +70,7 @@ class FakeTensorTest(TestCase):
             self.assertTrue(isinstance(out, FakeTensor))
 
     def test_nan_to_num(self):
-        with FakeTensorMode() as mode:
+        with FakeTensorMode():
             for dtype in [torch.float16, torch.float32]:
                 x = torch.rand([4], dtype=dtype)
                 y = torch.nan_to_num(x, nan=None)

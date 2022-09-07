@@ -34,7 +34,7 @@ from torch._C import (
     _has_torch_function, _has_torch_function_unary,
     _has_torch_function_variadic, _add_docstr, _set_torch_function_mode, _get_torch_function_mode)
 
-from torch.utils._mode_utils import _enable_mode, _ModeInfo, _restore_mode
+from torch.utils._mode_utils import _ModeInfo
 
 __all__ = [
     "get_ignored_functions",
@@ -1766,6 +1766,8 @@ def is_tensor_like(inp):
     return type(inp) is torch.Tensor or hasattr(type(inp), "__torch_function__")
 
 
+_cur_torch_function_mode = []
+
 def _wrap_torch_function(f):
     @functools.wraps(f)
     def wrapped(self, *args, **kwargs):
@@ -1773,8 +1775,7 @@ def _wrap_torch_function(f):
             raise RuntimeError("TorchFunctionMode's torch_function function " +
                                "should be a normal method not a class method")
 
-        with self._enable_inner_torch_function_mode():
-            return f(self, *args, **kwargs)
+        return f(self, *args, **kwargs)
     return wrapped
 
 
@@ -1791,18 +1792,8 @@ def _wrap_torch_function(f):
 # more difficult to interact with TorchFunctionModeMeta.
 class TorchFunctionModeMeta(type):
     """
-    Metaclass for :class:`TorchFunctionMode`; it does two things:
-
-        * Adds an implicit ``inner`` kwarg to ``__init__``, to
-          allow the modes to be chained together to form a stack.
-
-        * Reenables the inner mode, so that by default PyTorch API calls
-          will compositionally proceed to the next mode on the stack.
-
-    The default behavior for the second bullet is important, as it is easy to
-    accidentally write ``__torch_function__`` implementations that are not
-    compositional, and the wrapping here makes the obvious code do the
-    right thing (aka, this is why there is a metaclass).
+    A very thin metaclass that just wraps __torch_function__ to make it easier to check
+    if it's a classmethod
     """
     def __new__(metacls, name, bases, dct):
         if '__torch_function__' in dct:
@@ -1849,40 +1840,51 @@ class TorchFunctionMode(metaclass=TorchFunctionModeMeta):
     def __torch_function__(self, func, types, args=(), kwargs=None):
         raise NotImplementedError()
 
-    @contextlib.contextmanager
-    def _enable_inner_torch_function_mode(self) -> Iterator[None]:
-        """
-        Helper function for pushing during the wrapped torch function. Only staying around
-        until we do the mode stack update
-        """
-        inner = getattr(self, "inner", None)
-        return _enable_mode(inner, _TorchFunctionModeInfo())
-
     def __enter__(self):
         old = _get_torch_function_mode()
-        if hasattr(self, "inner"):
-            raise RuntimeError(f"{self} has already been used as a mode. Please use a fresh version or use restore")
-        else:
-            self.inner = old
-            if old is None:
-                self.ancestors = set()
-            else:
-                self.ancestors = self.inner.ancestors.union({self.inner})
-        _set_torch_function_mode(self)
+        if self in _cur_torch_function_mode or self is old:
+            raise RuntimeError(f"{self} is already active in the mode stack")
+        _push_mode(self)
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        _set_torch_function_mode(self.inner)
-
-    @contextlib.contextmanager
-    def restore(self):
-        return _restore_mode(self, mode_info=_TorchFunctionModeInfo())
+        _pop_mode()
 
     @classmethod
     def push(cls, *args, **kwargs):
         warnings.warn("`Mode.push()` is no longer necessary and can be replaced with just `with Mode()`")
         instance = cls(*args, **kwargs)
         return instance
+
+def _push_mode(mode):
+    _set_torch_function_mode(_TorchFunctionStackMode())
+    _cur_torch_function_mode.append(mode)
+
+
+def _pop_mode():
+    assert len(_cur_torch_function_mode) > 0
+    old = _cur_torch_function_mode.pop()
+    if len(_cur_torch_function_mode) == 0:
+        _set_torch_function_mode(None)
+    else:
+        _set_torch_function_mode(_TorchFunctionStackMode())
+    return old
+
+
+@contextlib.contextmanager
+def _pop_mode_temporarily():
+    old = _pop_mode()
+    try:
+        yield old
+    finally:
+        _push_mode(old)
+
+# a helper "mode" used by the torch dispatch push helper method. This is the only mode that will ever
+# be active at the C++ level and it will run the current mode
+class _TorchFunctionStackMode:
+    def __torch_function__(self, func, types, args=(), kwargs=None):
+        with _pop_mode_temporarily() as old:
+            return old.__torch_function__(func, types, args, kwargs)
 
 class BaseTorchFunctionMode(TorchFunctionMode):
     def __torch_function__(self, func, types, args=(), kwargs=None):
