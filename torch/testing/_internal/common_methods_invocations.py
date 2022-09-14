@@ -10237,6 +10237,11 @@ op_db: List[OpInfo] = [
            skips=(
                # AssertionError: Resizing an out= argument with no elements threw a resize warning!
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out', device_type='cpu'),
+
+               # It looks like there is a bug in the cpu implementation
+               # >>> assert torch.aminmax(torch.tensor(5, device='cpu'), dim=0, keepdim=True).min.ndim == 0
+               # the ndim shoud be kept at 0
+               DecorateInfo(unittest.expectedFailure, "TestCommon", "test_compare_cpu"),
            )),
     OpInfo('as_strided',
            op=lambda x, size, stride, storage_offset=0:
