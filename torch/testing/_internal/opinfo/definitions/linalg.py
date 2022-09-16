@@ -1450,6 +1450,12 @@ op_db: List[OpInfo] = [
                 device_type="mps",
                 dtypes=[torch.float32],
             ),
+            # This appears to be a different algorithm on cpu vs gpu
+            DecorateInfo(
+                unittest.skip("eig on cpu is sometimes different than cuda"),
+                "TestCommon",
+                "test_compare_cpu",
+            ),
         ),
         decorators=[skipCUDAIfNoMagma, skipCPUIfNoLapack, with_tf32_off],
     ),
@@ -1529,6 +1535,8 @@ op_db: List[OpInfo] = [
                 device_type="mps",
                 dtypes=[torch.float32],
             ),
+            # linalg.eigh appears to be a different algorithm on cpu vs gpu
+            DecorateInfo(unittest.expectedFailure, "TestCommon", "test_compare_cpu"),
         ),
     ),
     OpInfo(
@@ -1657,6 +1665,8 @@ op_db: List[OpInfo] = [
                 device_type="mps",
                 dtypes=[torch.float32],
             ),
+            # This appears to be a different algorithm on cpu vs gpu
+            DecorateInfo(unittest.expectedFailure, "TestCommon", "test_compare_cpu"),
         ),
     ),
     OpInfo(
@@ -1870,6 +1880,10 @@ op_db: List[OpInfo] = [
         supports_fwgrad_bwgrad=True,
         sample_inputs_func=sample_inputs_linalg_lu,
         decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack],
+        skips=(
+            # linalg.lu_factor: LU without pivoting is not implemented on the CPU
+            DecorateInfo(unittest.expectedFailure, "TestCommon", "test_compare_cpu"),
+        ),
     ),
     OpInfo(
         "linalg.lu_factor_ex",
@@ -1882,6 +1896,10 @@ op_db: List[OpInfo] = [
         supports_fwgrad_bwgrad=True,
         sample_inputs_func=sample_inputs_linalg_lu,
         decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack],
+        skips=(
+            # linalg.lu_factor: LU without pivoting is not implemented on the CPU
+            DecorateInfo(unittest.expectedFailure, "TestCommon", "test_compare_cpu"),
+        ),
     ),
     OpInfo(
         "linalg.lu",
@@ -1895,6 +1913,10 @@ op_db: List[OpInfo] = [
         supports_fwgrad_bwgrad=True,
         sample_inputs_func=sample_inputs_linalg_lu,
         decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack],
+        skips=(
+            # linalg.lu_factor: LU without pivoting is not implemented on the CPU
+            DecorateInfo(unittest.expectedFailure, "TestCommon", "test_compare_cpu"),
+        ),
     ),
     OpInfo(
         "linalg.lu_solve",
@@ -2259,6 +2281,8 @@ op_db: List[OpInfo] = [
                 device_type="mps",
                 dtypes=[torch.float32],
             ),
+            # This appears to be a different algorithm on cpu vs gpu
+            DecorateInfo(unittest.expectedFailure, "TestCommon", "test_compare_cpu"),
         ),
     ),
     OpInfo(
@@ -2345,6 +2369,10 @@ python_ref_db: List[OpInfo] = [
         supports_out=True,
         supports_nvfuser=False,
         op_db=op_db,
+        skips=(
+            # This appears to be a different algorithm on cpu vs gpu
+            DecorateInfo(unittest.expectedFailure, "TestCommon", "test_compare_cpu"),
+        ),
     ),
     PythonRefInfo(
         "_refs.linalg.svdvals",
