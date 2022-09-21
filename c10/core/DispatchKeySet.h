@@ -3,6 +3,7 @@
 #include <c10/util/Exception.h>
 #include <c10/util/Metaprogramming.h>
 #include <c10/util/llvmMathExtras.h>
+#include <atomic>
 #include <ostream>
 
 namespace c10 {
@@ -645,10 +646,10 @@ constexpr DispatchKeySet autocast_dispatch_keyset = DispatchKeySet({
 });
 
 // See Note [TLS Initialization]
-constexpr DispatchKeySet default_included_set = DispatchKeySet({
-    DispatchKey::BackendSelect,
-    DispatchKey::ADInplaceOrView,
-});
+extern C10_API std::atomic<DispatchKeySet> default_included_set;
+
+void add_to_default_include_set(std::initializer_list<DispatchKey> ks);
+void remove_from_default_include_set(std::initializer_list<DispatchKey> ks);
 
 constexpr DispatchKeySet default_excluded_set = DispatchKeySet({
     DispatchKey::AutocastCPU,

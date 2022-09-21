@@ -4,6 +4,19 @@
 
 namespace c10 {
 
+// On x86 architecture atomic operations are lock-less.
+std::atomic<DispatchKeySet> default_included_set(DispatchKeySet({DispatchKey::BackendSelect, DispatchKey::ADInplaceOrView}));
+
+void add_to_default_include_set(std::initializer_list<DispatchKey> ks) {
+  DispatchKeySet key_set = default_included_set.load();
+  default_included_set.store(key_set | DispatchKeySet(ks));
+}
+
+void remove_from_default_include_set(std::initializer_list<DispatchKey> ks) {
+  DispatchKeySet key_set = default_included_set.load();
+  default_included_set.store(key_set - DispatchKeySet(ks));
+}
+
 // backend_dispatch_keyset includes all dispatch keys that map to backends.
 // Alias key DispatchKey::CompositeExplicitAutograd maps to
 // backend_dispatch_keyset
