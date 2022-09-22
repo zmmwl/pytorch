@@ -19,6 +19,8 @@ def _lerp(low: float, high: float, weight: torch.Tensor) -> torch.Tensor:
         return weight
     elif low == 0:
         return high * weight
+    elif weight.device.type in ('cpu', 'cuda'):
+        return torch._lerp_scalar(low, high, weight)
     else:
         return high * weight + low * (1 - weight)
 
