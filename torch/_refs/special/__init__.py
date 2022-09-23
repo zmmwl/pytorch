@@ -4,7 +4,6 @@ from typing import Optional
 import torch
 import torch._prims as prims
 import torch._prims_common as utils
-import torch._refs as refs
 
 from torch import Tensor
 from torch._decomp import register_decomposition
@@ -21,7 +20,9 @@ __all__ = [
     "i1",
     "i1e",
     "logit",
+    "log_softmax",
     "multigammaln",
+    "softmax",
     "zeta",
 ]
 
@@ -72,6 +73,26 @@ def multigammaln(a: TensorLikeType, p: int) -> TensorLikeType:
     c = 0.25 * p * (p - 1) * math.log(math.pi)
     b = 0.5 * torch.arange(start=(1 - p), end=1, step=1, dtype=a.dtype, device=a.device)
     return torch.sum(torch.lgamma(a.unsqueeze(-1) + b), dim=-1) + c
+
+
+# Forwarding alias: the special variant doesn't support the out kwarg
+# CompositeImplicitAutograd - don't register decomp
+def log_softmax(
+    a: TensorLikeType,
+    dim: int,
+    dtype: Optional[torch.dtype] = None,
+) -> TensorLikeType:
+    return torch.log_softmax(a=a, dim=dim, dtype=dtype)  # type: ignore[call-overload]
+
+
+# Forwarding alias: the special variant doesn't support the out kwarg
+# CompositeImplicitAutograd - don't register decomp
+def softmax(
+    a: TensorLikeType,
+    dim: int,
+    dtype: Optional[torch.dtype] = None,
+) -> TensorLikeType:
+    return torch.softmax(a=a, dim=dim, dtype=dtype)  # type: ignore[call-overload]
 
 
 zeta = _make_elementwise_binary_reference(
