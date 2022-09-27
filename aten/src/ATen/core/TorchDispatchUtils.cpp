@@ -17,10 +17,9 @@ bool tensorlist_has_dispatch(at::ITensorListRef li) {
   return false;
 }
 
-bool tensorlist_has_dispatch(const c10::List<c10::optional<at::Tensor>>& li) {
-  for (auto i : c10::irange(li.size())) {
-    auto t = li.get(i);
-    if (t && tensor_has_dispatch(*t)) {
+bool tensorlist_has_dispatch(at::IOptTensorListRef li) {
+  for (const auto& t : li) {
+    if (t.has_value() && tensor_has_dispatch(*t)) {
       return true;
     }
   }

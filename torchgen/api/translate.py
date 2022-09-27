@@ -8,9 +8,7 @@ from torchgen.api.types import (
     deviceT,
     Expr,
     intArrayRefT,
-    iOptTensorListRefT,
     layoutT,
-    ListCType,
     longT,
     memoryFormatT,
     MutRefCType,
@@ -181,12 +179,6 @@ def translate(
             ctx[
                 NamedCType(t.name, BaseCType(opmath_t))
             ] = f"static_cast<opmath_t>({b.expr})"
-
-        # [Note: IOptTensorListRef]
-        if t.type == ConstRefCType(ListCType(OptionalCType(BaseCType(tensorT)))):
-            ctx[
-                NamedCType(t.name, BaseCType(iOptTensorListRefT))
-            ] = f"at::IOptTensorListRef({b.expr})"
 
     # Add implicit bindings if the generated code is inside a Tensor method
     if method:

@@ -8,6 +8,7 @@
 #include <ATen/core/Dict.h>
 #include <ATen/core/List.h>
 #include <ATen/core/IListRef.h>
+#include <ATen/core/Tensor.h>
 #include <ATen/core/functional.h>
 #include <ATen/core/jit_type.h>
 #include <ATen/core/qualified_name.h>
@@ -2037,6 +2038,12 @@ inline IValue::IValue(std::array<T, N> v) : IValue(c10::List<T>()) {
     list.push_back(std::move(e));
   }
 }
+
+inline c10::optional<at::Tensor> to_c10_optional(at::OptionalTensorRef ref) {
+  return ref.has_value() ? c10::optional<at::Tensor>(*ref) : c10::nullopt;
+}
+
+inline IValue::IValue(at::OptionalTensorRef v) : IValue(to_c10_optional(v)) {}
 
 template <class T, IValue::enable_if_ilist_is_ivalue_constructible<T>>
 inline IValue::IValue(c10::IListRef<T> v) : IValue() {

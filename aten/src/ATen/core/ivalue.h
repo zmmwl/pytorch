@@ -705,6 +705,7 @@ public:
           std::is_constructible<IValue, typename IListRef<T>::boxed_type>::value,
       std::nullptr_t>;
 
+  IValue(at::OptionalTensorRef v);
   template <class T, enable_if_ilist_is_ivalue_constructible<T> = nullptr>
   IValue(c10::IListRef<T> v);
 

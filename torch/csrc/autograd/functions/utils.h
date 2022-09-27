@@ -51,6 +51,11 @@ struct ComputeRequiresGrad : IterArgs<ComputeRequiresGrad> {
       (*this)(*tensor);
     }
   }
+  void operator()(const at::OptionalTensorRef& tensor) {
+    if (tensor.has_value()) {
+      (*this)(*tensor);
+    }
+  }
   bool short_circuit() {
     return out;
   }
@@ -96,11 +101,19 @@ inline void set_history(
   }
 }
 
-inline bool isFwGradDefined(const c10::optional<at::Tensor>& t) {
-  return t.has_value() && t->defined() && t->_fw_grad(/*level */ 0).defined();
+inline bool isFwGradDefined(const at::Tensor& t) {
+  return t.defined() && t._fw_grad(/*level */ 0).defined();
 }
 
-inline bool isFwGradDefinedTensorList(const at::ITensorListRef& variables) {
+inline bool isFwGradDefined(const c10::optional<at::Tensor>& t) {
+  return t.has_value() && isFwGradDefined(*t);
+}
+
+inline bool isFwGradDefined(const at::OptionalTensorRef& t) {
+  return isFwGradDefined(*t);
+}
+
+inline bool isFwGradDefinedTensorList(at::ITensorListRef variables) {
   bool ret = false;
   for (auto& variable : variables) {
     ret |= isFwGradDefined(variable);
@@ -108,12 +121,10 @@ inline bool isFwGradDefinedTensorList(const at::ITensorListRef& variables) {
   return ret;
 }
 
-inline bool isFwGradDefinedTensorList(
-    const c10::List<c10::optional<at::Tensor>> li) {
+inline bool isFwGradDefinedTensorList(at::IOptTensorListRef li) {
   bool ret = false;
-  for (auto i : c10::irange(li.size())) {
-    auto t = li.get(i);
-    ret |= (t.has_value() && isFwGradDefined(t.value()));
+  for (auto t : li) {
+    ret |= (t.has_value() && isFwGradDefined(*t));
   }
   return ret;
 }

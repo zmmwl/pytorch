@@ -50,6 +50,13 @@ inline c10::optional<Tensor> to_meta(const c10::optional<Tensor>& t) {
   return c10::nullopt;
 }
 
+inline c10::optional<Tensor> to_meta(at::OptionalTensorRef t) {
+  if (t.has_value()) {
+    return c10::make_optional<Tensor>(to_meta(*t));
+  }
+  return c10::nullopt;
+}
+
 inline std::vector<Tensor> to_meta(at::ITensorListRef t_list) {
   std::vector<Tensor> outputs;
   outputs.reserve(t_list.size());
@@ -68,15 +75,26 @@ inline c10::List<Tensor> to_meta(const c10::List<Tensor>& t_list) {
   return outputs;
 }
 
-inline c10::List<c10::optional<Tensor>> to_meta(const c10::List<c10::optional<Tensor>>& t_list) {
+inline c10::List<c10::optional<Tensor>> to_meta(at::IOptTensorListRef t_list) {
   c10::List<c10::optional<Tensor>> outputs;
   outputs.reserve(t_list.size());
-  for (const auto i : c10::irange(t_list.size())) {
-    outputs.push_back(to_meta(t_list[i]));
+  for (const auto& t : t_list) {
+    outputs.push_back(to_meta(t));
   }
   return outputs;
 }
 
+inline c10::List<c10::optional<Tensor>> to_boxed(at::IOptTensorListRef t_list) {
+  if (t_list.isBoxed()) {
+    return t_list.toBoxed();
+  }
+  c10::List<c10::optional<Tensor>> outputs;
+  outputs.reserve(t_list.size());
+  for (const auto& t : t_list) {
+    outputs.push_back(t.has_value() ? c10::optional<Tensor>(*t) : c10::nullopt);
+  }
+  return outputs;
+}
 
 ${func_definitions}
 

@@ -523,7 +523,7 @@ at::Tensor embedding_dense_double_backward(
     int64_t padding_idx);
 at::Tensor index_backward(
     at::Tensor zeros_like_self,
-    const torch::List<c10::optional<Tensor>>& indices,
+    at::IOptTensorListRef indices,
     const at::Tensor& grad);
 at::Tensor _cudnn_ctc_loss_backward(
     const at::Tensor& grad_out,

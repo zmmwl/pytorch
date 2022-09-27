@@ -294,7 +294,7 @@ TORCH_API void addInputs(
 TORCH_API void addInputs(
     Node* n,
     const char* name,
-    const List<c10::optional<at::Tensor>>& value);
+    at::IOptTensorListRef value);
 TORCH_API void addInputs(
     Node* n,
     const char* name,

@@ -372,7 +372,7 @@ void check_indices_on_cpu_or_selfdevice(
 }
 
 TORCH_PRECOMPUTE_META_FUNC2(index, Tensor)
-(const Tensor& self, at::IOptTensorListRef indices) {
+(const Tensor& self, const at::IOptTensorListRef& indices) {
   auto materialized = indices.materialize();
 
   TORCH_CHECK_INDEX(
@@ -560,7 +560,7 @@ TORCH_IMPL_FUNC(index_out)
   index_stub(device_type(), *this, sizes, strides);
 }
 
-Tensor quantized_index(const Tensor & self, const torch::List<c10::optional<Tensor>>& indices) {
+Tensor quantized_index(const Tensor & self, const at::IOptTensorListRef& indices) {
   TORCH_INTERNAL_ASSERT(
       self.qscheme() == c10::kPerTensorAffine ||
       self.qscheme() == c10::kPerTensorSymmetric,

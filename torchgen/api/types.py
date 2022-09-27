@@ -21,6 +21,7 @@ TENSOR_LIST_LIKE_CTYPES = [
     "at::TensorList",
     "const c10::List<c10::optional<at::Tensor>> &",
     "const at::ITensorListRef &",
+    "const at::IOptTensorListRef &",
 ]
 
 # An ArgName is just the str name of the argument in schema;

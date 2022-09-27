@@ -13,6 +13,7 @@ from torchgen.api.types import (
     CType,
     dimnameListT,
     intArrayRefT,
+    iOptTensorListRefT,
     iTensorListRefT,
     ListCType,
     longT,
@@ -199,9 +200,12 @@ def argumenttype_type(
         elif str(t.elem) == "Dimname":
             return NamedCType(binds, BaseCType(dimnameListT))
         elif str(t.elem) == "Tensor?":
-            return NamedCType(
-                binds, ConstRefCType(ListCType(OptionalCType(BaseCType(tensorT))))
-            )
+            if local.use_ilistref_for_tensor_lists():
+                return NamedCType(binds, ConstRefCType(BaseCType(iOptTensorListRefT)))
+            else:
+                return NamedCType(
+                    binds, ConstRefCType(ListCType(OptionalCType(BaseCType(tensorT))))
+                )
         elem = argumenttype_type(t.elem, mutable=mutable, binds=binds, symint=symint)
         return NamedCType(binds, ArrayRefCType(elem.type))
     else:

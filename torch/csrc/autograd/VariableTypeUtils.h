@@ -408,14 +408,14 @@ inline void check_no_requires_grad(
 }
 
 inline void check_no_requires_grad(
-    const c10::List<c10::optional<at::Tensor>>& tensors,
+    at::IOptTensorListRef tensors,
     const char* name,
     const char* fn_name = "") {
   // GradMode check is expensive, so check it only once for TensorLists
   if (!GradMode::is_enabled()) {
     return;
   }
-  for (c10::optional<at::Tensor> tensor : tensors) {
+  for (const auto& tensor : tensors) {
     if (tensor.has_value()) {
       check_no_requires_grad(*tensor, name, fn_name, /*check_grad_mode*/ false);
     }
@@ -432,15 +432,14 @@ inline std::vector<SavedVariable> make_saved_variable_list(
 
 // Assumed that saved tensor lists are never inplace outputs
 inline std::vector<SavedVariable> make_saved_variable_list(
-    const c10::List<c10::optional<at::Tensor>>& tensors) {
-  return fmap(
-      tensors, [](const c10::optional<at::Tensor>& tensor) -> SavedVariable {
-        if (tensor.has_value()) {
-          return SavedVariable{*tensor, false /* is output */};
-        } else {
-          return SavedVariable{at::Tensor(), false /* is output */};
-        }
-      });
+    at::IOptTensorListRef tensors) {
+  return fmap(tensors, [](const auto& tensor) -> SavedVariable {
+    if (tensor.has_value()) {
+      return SavedVariable{*tensor, false /* is output */};
+    } else {
+      return SavedVariable{at::Tensor(), false /* is output */};
+    }
+  });
 }
 
 inline std::vector<std::vector<int64_t>> to_args_sizes(

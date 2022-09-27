@@ -8,8 +8,11 @@ from torchgen.api.types import (
     CType,
     DispatcherSignature,
     FunctionalizationLambda,
+    iOptTensorListRefT,
     iTensorListRefT,
+    ListCType,
     NativeSignature,
+    OptionalCType,
     tensorListT,
     tensorT,
     VectorCType,
@@ -176,6 +179,8 @@ def get_owning_type(t: CType) -> Tuple[CType, Callable[[str], str]]:
         return VectorCType(BaseCType(tensorT)), lambda x: f"{x}.vec()"
     if t == BaseCType(iTensorListRefT):
         return VectorCType(BaseCType(tensorT)), lambda x: f"{{{x}.begin(), {x}.end()}}"
+    if t == BaseCType(iOptTensorListRefT):
+        return ListCType(OptionalCType(BaseCType(tensorT))), lambda x: f"to_boxed({x})"
     # There are technically other non-owning types out there (like IntArrayRef),
     # but functionalization only actually cares about the ones involving tensors.
     return t, lambda x: x

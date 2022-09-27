@@ -4874,12 +4874,14 @@ Tensor embedding_dense_double_backward(
 
 Tensor index_backward(
     Tensor zeros_like_self,
-    const torch::List<c10::optional<Tensor>>& indices,
+    at::IOptTensorListRef indices,
     const Tensor& grad) {
+  auto boxed_indices = at::IOptTensorListRefMaybeOwnBoxed(indices);
   return (areAnyTensorSubclassLike({zeros_like_self, grad}) ||
           areAnyOptionalTensorSubclassLike(indices))
-      ? zeros_like_self.index_put(indices, grad, true)
-      : at::_index_put_impl_(zeros_like_self, indices, grad, true, true);
+      ? zeros_like_self.index_put(boxed_indices.get(), grad, true)
+      : at::_index_put_impl_(
+            zeros_like_self, boxed_indices.get(), grad, true, true);
 }
 
 Tensor _cudnn_ctc_loss_backward(

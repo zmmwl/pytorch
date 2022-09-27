@@ -1,5 +1,6 @@
 #pragma once
 #include <ATen/ATen.h>
+#include <ATen/core/IListRef.h>
 #include <c10/core/impl/TorchDispatchModeTLS.h>
 
 namespace at {
@@ -52,14 +53,12 @@ inline bool areAnyTensorSubclassLike(TensorList tensors) {
   return std::any_of(tensors.begin(), tensors.end(), isTensorSubclassLike);
 }
 
-inline bool areAnyOptionalTensorSubclassLike(
-    const c10::List<c10::optional<Tensor>>& tensors) {
+inline bool areAnyOptionalTensorSubclassLike(IOptTensorListRef tensors) {
   if (c10::impl::dispatch_mode_enabled())
     return true;
   return std::any_of(
-      tensors.begin(), tensors.end(), [](const optional<Tensor>& opt_tensor) {
-        return (
-            opt_tensor.has_value() && isTensorSubclassLike(opt_tensor.value()));
+      tensors.begin(), tensors.end(), [](const auto& opt_tensor) {
+        return (opt_tensor.has_value() && isTensorSubclassLike(*opt_tensor));
       });
 }
 
