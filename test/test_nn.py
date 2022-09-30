@@ -6818,6 +6818,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         with self.assertRaisesRegex(ValueError, 'is not valid'):
             F.poisson_nll_loss(input, target, reduction='total')
 
+    # TODO: Move to OpInfo reference inputs.
     def test_gaussian_nll_loss_reduction_modes(self):
         input = torch.tensor([[0.5, 1.5, 2.5], [2., 4., 6.]])
         target = torch.tensor([[1., 2., 3.], [4., 5., 6.]])
@@ -6829,9 +6830,8 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
                          F.gaussian_nll_loss(input, target, var, reduction='sum'))
         self.assertEqual(torch.mean(component_wise_loss),
                          F.gaussian_nll_loss(input, target, var, reduction='mean'))
-        with self.assertRaisesRegex(ValueError, 'is not valid'):
-            F.gaussian_nll_loss(input, target, var, reduction='total')
 
+    # TODO: Move to OpInfo reference inputs.
     def test_gaussian_nll_loss_broadcasting(self):
         input = torch.tensor([[0.5, 1.5, 2.5], [2., 4., 6.]])
         target_full = torch.tensor([[1., 2., 3.], [1., 2., 3.]])
@@ -6850,16 +6850,6 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
                          F.gaussian_nll_loss(input, target_part, var_part1, reduction='none'))
         self.assertEqual(component_wise_loss,
                          F.gaussian_nll_loss(input, target_part, var_part2, reduction='none'))
-
-    def test_gaussian_nll_loss_args(self):
-        input = torch.randn(3, 5)
-        with self.assertRaisesRegex(ValueError, 'var is of incorrect size'):
-            target = torch.randn(3, 5)
-            var = torch.ones(3, 3)
-            torch.nn.functional.gaussian_nll_loss(input, target, var)
-        with self.assertRaisesRegex(ValueError, 'var has negative entry/entries'):
-            var = -1 * torch.ones(3, 5)
-            torch.nn.functional.gaussian_nll_loss(input, target, var)
 
     def test_KLDivLoss_batch_mean(self):
         input_shape = (2, 5)

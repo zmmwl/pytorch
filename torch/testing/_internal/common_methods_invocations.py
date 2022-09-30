@@ -7231,6 +7231,29 @@ def sample_inputs_gaussian_nll_loss(op_info, device, dtype, requires_grad, **kwa
     for input, target, var, kwargs in gen_shape_kwargs():
         yield SampleInput(input, args=(target, var, ), kwargs=kwargs)
 
+def error_inputs_gaussian_nll_loss(op_info, device, **kwargs):
+    make_input = partial(make_tensor, device=device, dtype=torch.float32)
+
+    samples = (
+        # input, args, kwargs, error_type, error_regex
+        # invalid reduction value
+        (make_input(10, 2, 3), (make_input(10, 2, 3), make_input((10, 2, 3), low=0)), dict(reduction="abc"),
+         ValueError, "abc is not a valid value for reduction"),
+
+        # var is of incorrect shape
+        (make_input(10, 2, 3), (make_input(10, 2, 3), make_input((10, 2, 2), low=0)), dict(),
+         ValueError, "var is of incorrect size"),
+
+        # target is of incorrect shape
+        (make_input(10, 2, 3), (make_input(10, 2, 2), make_input((10, 2, 3), low=0)), dict(),
+         RuntimeError,
+         r"The size of tensor a \(3\) must match the size of tensor b \(2\) at non-singleton dimension 2"),
+    )
+
+    for input, args, kwargs, error_type, error_regex in samples:
+        yield ErrorInput(SampleInput(input, args=args, kwargs=kwargs),
+                         error_type=error_type, error_regex=error_regex)
+
 def _generate_sample_inputs_nn_loss(op_info, device, dtype, requires_grad, **kwargs):
     _make_tensor = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
 
@@ -16157,25 +16180,21 @@ op_db: List[OpInfo] = [
     ),
     OpInfo(
         "nn.functional.gaussian_nll_loss",
-        dtypes=floating_types_and(torch.bfloat16),
-        dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
+        dtypes=all_types_and(torch.bfloat16),
+        dtypesIfCUDA=all_types_and(torch.bfloat16, torch.float16),
         # Runs very slowly on slow gradcheck - alternatively reduce input sizes
         gradcheck_fast_mode=True,
         supports_out=False,
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
         sample_inputs_func=sample_inputs_gaussian_nll_loss,
+        error_inputs_func=error_inputs_gaussian_nll_loss,
         skips=(
-            # Pre-existing condition (calls .item); needs to be fixed
-            DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_backward'),
-            DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_forward_ad'),
-            # Pre-existing condition (calls .item); needs to be fixed
-            DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_operator'),
             # JIT does not support variadic tensors.
             # RuntimeError: input->type()->kind() == TypeKind::OptionalType
             # INTERNAL ASSERT FAILED at "../torch/csrc/jit/passes/utils/check_alias_annotation.cpp":270,
             # please report a bug to PyTorch.
-            DecorateInfo(unittest.skip("Skipped!"), "TestJit", "test_variant_consistency_jit", dtypes=(torch.float32,),),
+            DecorateInfo(unittest.expectedFailure, "TestJit", "test_variant_consistency_jit", dtypes=(torch.float32,),),
         ),
         decorators=(
             DecorateInfo(toleranceOverride({torch.float16: tol(atol=1e-02, rtol=1e-02),
