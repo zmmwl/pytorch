@@ -1829,6 +1829,8 @@ def _run_symbolic_function(
     opset_version = GLOBALS.export_onnx_opset_version
 
     # See Note [Export inplace]
+    # TODO(justinchuby): We may not need this since there is a pass handling in place ops
+    # We should also remove the inplace ops from the symbolic registry
     node_kind = node.kind()
     if node_kind.endswith("_"):
         # Treat relu_ -> relu; add_ -> add etc.
@@ -1862,12 +1864,10 @@ def _run_symbolic_function(
             symbolic_function_name
         )
         if symbolic_function_group is not None:
-            symbolic_fn = symbolic_function_group.get(opset_version)
-            if symbolic_fn is not None:
-                attrs = {
-                    k: symbolic_helper._node_get(node, k) for k in node.attributeNames()
-                }
-                return symbolic_fn(graph_context, *inputs, **attrs)
+            attrs = {
+                k: symbolic_helper._node_get(node, k) for k in node.attributeNames()
+            }
+            return symbolic_function_group(graph_context, *inputs, **attrs)
 
         attrs = {
             k + "_" + node.kindOf(k)[0]: symbolic_helper._node_get(node, k)
@@ -1892,9 +1892,7 @@ def _run_symbolic_function(
         raise errors.UnsupportedOperatorError(
             symbolic_function_name,
             opset_version,
-            symbolic_function_group.get_min_supported()
-            if symbolic_function_group
-            else None,
+            None,
         )
 
     except RuntimeError:
