@@ -23,6 +23,7 @@ from torch.onnx import (  # noqa: F401
 )
 from torch.onnx._globals import GLOBALS
 from torch.onnx._internal import _beartype, jit_utils
+from torch.onnx._internal.dispatch import symbolics
 from torch.types import Number
 
 __all__ = [
@@ -652,7 +653,7 @@ def _select_helper(g: jit_utils.GraphContext, self, dim, index, apply_reshape=Tr
     elif index_dim is not None and apply_reshape:
         if index_dim == 0:
             # Index is a scalar. Reshape it to a size 1 tensor.
-            index = _reshape_helper(
+            index = symbolics.aten.reshape(
                 g, index, g.op("Constant", value_t=torch.LongTensor([1]))
             )
 
@@ -672,6 +673,7 @@ def _slice_helper(
     steps=None,
     dynamic_slice=False,
 ):
+    # TODO(justinchuby): Use the dispatcher
     if g.opset <= 9:
         from torch.onnx.symbolic_opset9 import _slice as _slice9
 
@@ -742,48 +744,6 @@ def _generate_wrapped_number(g: jit_utils.GraphContext, scalar):
     if isinstance(scalar, float):
         return g.op("Constant", value_t=torch.tensor(scalar, dtype=torch.double))
     return g.op("Constant", value_t=torch.tensor(scalar))
-
-
-@_beartype.beartype
-def _sort_helper(g: jit_utils.GraphContext, input, dim, decending=True, out=None):
-    if out is not None:
-        _unimplemented("Sort", "Out parameter is not supported")
-    shape_ = g.op("Shape", input)
-    dim_size_ = g.op(
-        "Gather",
-        shape_,
-        g.op("Constant", value_t=torch.tensor([dim], dtype=torch.int64)),
-    )
-    if g.opset <= 10:
-        if not decending:
-            _unimplemented("Sort", "Ascending is not supported")
-        return g.op("TopK", input, dim_size_, axis_i=dim, outputs=2)
-    else:
-        return g.op(
-            "TopK", input, dim_size_, axis_i=dim, largest_i=decending, outputs=2
-        )
-
-
-@_beartype.beartype
-def _topk_helper(
-    g: jit_utils.GraphContext, input, k, dim, largest=True, sorted=False, out=None
-):
-    if out is not None:
-        _unimplemented("TopK", "Out parameter is not supported")
-    if not _is_value(k):
-        k = g.op("Constant", value_t=torch.tensor([k], dtype=torch.int64))
-    else:
-        k = _reshape_helper(g, k, g.op("Constant", value_t=torch.tensor([1])))
-        if _try_get_scalar_type(k) != "Long":
-            k = g.op("Cast", k, to_i=_C_onnx.TensorProtoDataType.INT64)
-    if g.opset <= 10:
-        if not largest:
-            _unimplemented("TopK", "Ascending is not supported")
-        return g.op("TopK", input, k, axis_i=dim, outputs=2)
-    else:
-        return g.op(
-            "TopK", input, k, axis_i=dim, largest_i=largest, sorted_i=sorted, outputs=2
-        )
 
 
 @_beartype.beartype
@@ -1019,7 +979,7 @@ def _argmin_argmax_helper(
         return g.op(op_name, input, axis_i=axis_i, keepdims_i=keepdims_i)
 
     if _is_none(dim):
-        flattened = _reshape_helper(
+        flattened = symbolics.aten.reshape(
             g, input, g.op("Constant", value_t=torch.tensor([-1]))
         )
         output = op_wrapper(flattened, axis_i=0, keepdims_i=False)
@@ -1327,26 +1287,6 @@ def _index_fill_reshape_helper(g: jit_utils.GraphContext, self, dim, index):
     return expanded_index_shape, expanded_index
 
 
-# By default, when any value in the 'shape' input is equal to zero
-# the corresponding dimension value is copied from the input tensor dynamically.
-# allowzero=1 indicates that if any value in the 'shape' input is set to zero,
-# the zero value is honored, similar to NumPy.
-# allowzero=1 is only supported for opset version >= 14.
-@_beartype.beartype
-def _reshape_helper(g: jit_utils.GraphContext, input, shape, allowzero=0):
-    shape = _maybe_get_const(shape, "is")
-    if not _is_value(shape):
-        shape = g.op("Constant", value_t=torch.LongTensor(shape))
-    if g.opset <= 13:
-        if allowzero == 1:
-            _onnx_opset_unsupported(
-                "Reshape with allowzero=1", GLOBALS.export_onnx_opset_version, 14, input
-            )
-        return g.op("Reshape", input, shape)
-    else:
-        return g.op("Reshape", input, shape, allowzero_i=allowzero)
-
-
 @_beartype.beartype
 def _batchnorm_helper(
     g: jit_utils.GraphContext, input, weight, bias, running_mean, running_var
@@ -1390,7 +1330,7 @@ def _batchnorm_helper(
         or _is_none(running_var)
     ):
         assert batch_size is not None and channel_size is not None
-        reshape_in = _reshape_helper(
+        reshape_in = symbolics.aten.reshape(
             g,
             input,
             g.op(
@@ -1535,10 +1475,10 @@ def dequantize_helper(
     scale = g.op("Cast", scale, to_i=_C_onnx.TensorProtoDataType.FLOAT)
     zero_point = g.op("Cast", zero_point, to_i=qdtype)
 
-    if axis_i is not None and GLOBALS.export_onnx_opset_version < 13:
+    if axis_i is not None and g.opset < 13:
         _onnx_opset_unsupported_detailed(
             "DequantizeLinear",
-            GLOBALS.export_onnx_opset_version,
+            g.opset,
             13,
             "Attribute axis is not supported.",
             qtensor,
@@ -1573,14 +1513,10 @@ def quantize_helper(
     Returns:
         A TupleConstruct storing information of the quantized tensor.
     """
-    if (
-        axis is not None
-        and not _is_none(axis)
-        and GLOBALS.export_onnx_opset_version < 13
-    ):
+    if axis is not None and not _is_none(axis) and g.opset < 13:
         _onnx_opset_unsupported_detailed(
             "QuantizeLinear",
-            GLOBALS.export_onnx_opset_version,
+            g.opset,
             13,
             "Attribute axis is not supported.",
             tensor,
