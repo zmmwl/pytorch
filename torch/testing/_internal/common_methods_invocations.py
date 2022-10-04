@@ -1058,6 +1058,7 @@ def sample_inputs_baddbmm(op_info, device, dtype, requires_grad, **kwargs):
         ).with_metadata(broadcasts_input=broadcasts_input)
 
         if dtype.is_complex:
+            args = (make_arg(input_shape), make_arg(batch1_shape), make_arg(batch2_shape))
             yield SampleInput(
                 make_arg(input_shape),
                 make_arg(batch1_shape),
