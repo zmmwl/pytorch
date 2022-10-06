@@ -637,8 +637,6 @@ class TestOperators(TestCase):
         xfail("take"),  # vmap: inplace into a regular tensor
         xfail("to"),  # rank 4 tensor for channels_last
         xfail("view_as_complex"),  # RuntimeError: Tensor must have a last dimension with stride 1
-        xfail("masked.softmax", device_type='cuda'),  # Mismatch in values!
-        xfail("masked.softmin", device_type='cuda'),  # Mismatch in values!
         # got a batched tensor as input while the running_mean or running_var,
         # which will be updated in place, were not batched.
         xfail("nn.functional.batch_norm", 'without_cudnn'),
@@ -1199,7 +1197,7 @@ class TestOperators(TestCase):
         tol1('masked.prod',
              {torch.float32: tol(atol=1e-04, rtol=1.3e-05)}),
         tol1('masked.cumprod',
-             {torch.float32: tol(atol=1e-04, rtol=1e-04)}),
+             {torch.float32: tol(atol=1e-04, rtol=5e-04)}),
         tol1('cumprod',
              {torch.float32: tol(atol=1e-04, rtol=1.3e-05)}, device_type='cuda'),
         tol1('linalg.vander',
@@ -1584,6 +1582,10 @@ class TestOperators(TestCase):
              {torch.float32: tol(atol=5e-04, rtol=9e-03)}, device_type='cuda'),
         tol1('linalg.householder_product',
              {torch.float32: tol(atol=1e-04, rtol=1e-04)}, device_type='cpu'),
+        tol1('linalg.multi_dot',
+             {torch.float32: tol(atol=2e-04, rtol=1e-04)}, device_type='cuda'),
+        tol2('linalg.pinv', 'hermitian',
+             {torch.float32: tol(atol=5e-06, rtol=5e-06)}),
     ))
     def test_vmap_autograd_grad(self, device, dtype, op):
         def is_differentiable(inp):
