@@ -729,6 +729,10 @@ py::object _get_operation_for_overload_or_packet(
     const py::kwargs& kwargs,
     bool is_overload,
     c10::optional<c10::DispatchKey> dk) {
+  if (should_skip_torch_function()) {
+    return invokeOperatorFromPython(operations, args, kwargs);
+  }
+
   std::vector<py::handle> overloaded_args;
   size_t total_arg_num = args.size() + kwargs.size();
   for (const auto i : c10::irange(args.size())) {

@@ -286,15 +286,18 @@ struct PYBIND11_EXPORT FunctionSignature {
 struct PythonArgs {
   PythonArgs(
       bool traceable,
+      bool skip_torch_function,
       const FunctionSignature& signature,
       PyObject** args)
       : idx(signature.index),
         traceable(traceable),
+        skip_torch_function(skip_torch_function),
         signature(signature),
         args(args) {}
 
   int idx;
   bool traceable;
+  bool skip_torch_function;
   const FunctionSignature& signature;
   PyObject** args;
 
@@ -442,8 +445,10 @@ inline PythonArgs PythonArgParser::parse(PyObject* self, ParsedArgs<0>& dst) {
 }
 
 inline bool PythonArgs::has_torch_function() {
-  return !this->signature.overloaded_args.empty() ||
-      at::impl::PythonTorchFunctionTLS::get_mode();
+  return (
+      !this->skip_torch_function &&
+      (!this->signature.overloaded_args.empty() ||
+       at::impl::PythonTorchFunctionTLS::get_mode()));
 }
 
 inline std::string PythonArgs::get_func_name() {

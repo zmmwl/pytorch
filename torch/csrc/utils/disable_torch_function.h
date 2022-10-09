@@ -1,6 +1,7 @@
 #pragma once
 #include <c10/core/DispatchKey.h>
 #include <c10/core/impl/LocalDispatchKeySet.h>
+#include <c10/util/ArrayRef.h>
 #include <torch/csrc/python_headers.h>
 
 namespace torch {
@@ -9,6 +10,7 @@ namespace torch {
 
 // This is an internal utility, not exposed to users.
 bool torch_function_enabled();
+bool should_skip_torch_function();
 PyObject* disabled_torch_function_impl();
 PyObject* disabled_torch_dispatch_impl();
 void set_disabled_torch_function_impl(PyObject* value);
@@ -17,6 +19,9 @@ void set_disabled_torch_dispatch_impl(PyObject* value);
 // using mode here will improperly cause you to add ALL objects to the
 // overloaded list even if they don't actually have __torch_function__
 bool check_has_torch_function(PyObject* obj, bool ignore_mode = false);
+
+bool has_torch_function(PyObject* obj);
+bool has_torch_function(c10::ArrayRef<PyObject*> args);
 
 struct DisableTorchDispatch {
   DisableTorchDispatch()
@@ -32,6 +37,7 @@ PyObject* THPModule_isEnabledTorchFunction(PyObject* self, PyObject* unused);
 PyObject* THPModule_DisableTorchFunctionType();
 PyObject* THPModule_disable_torch_function(PyObject* self, PyObject* args);
 PyObject* THPModule_disable_torch_dispatch(PyObject* self, PyObject* args);
+PyObject* THPModule_skip_one_hop_torch_function(PyObject* self, PyObject* args);
 PyObject* THPModule_has_torch_function(PyObject*, PyObject* arg);
 PyObject* THPModule_has_torch_function_unary(PyObject*, PyObject* obj);
 PyObject* THPModule_has_torch_function_variadic(

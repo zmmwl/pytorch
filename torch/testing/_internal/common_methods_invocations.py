@@ -10976,13 +10976,21 @@ op_db: List[OpInfo] = [
                DecorateInfo(
                    toleranceOverride({torch.float32: tol(atol=1e-04, rtol=2e-05), }),
                    'TestCompositeCompliance', 'test_forward_ad', device_type='cuda',
-                   active_if=TEST_CUDNN)],
+                   active_if=TEST_CUDNN),
+               DecorateInfo(
+                   toleranceOverride({torch.float32: tol(atol=1e-04, rtol=2e-05)}),
+                   "TestTorchFunctionRedispatchOps", "test_redispatch", device_type="cuda"),
+           ],
            skips=(
                # RuntimeError: !lhs.isAliasOf(rhs)INTERNAL ASSERT FAILED at
                # "../torch/csrc/jit/passes/utils/check_alias_annotation.cpp":104, please report a bug to PyTorch.
                DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
                DecorateInfo(unittest.skip("Skipped! 75029"), 'TestCudaFuserOpInfo', 'test_nvfuser_correctness'),
                DecorateInfo(unittest.skip("Skipped! 75363"), 'TestCudaFuserOpInfo', 'test_nvfuser_extremal_values'),
+               DecorateInfo(
+                   unittest.skip("Skipped!"), "TestTorchFunctionRedispatchOps", "test_redispatch",
+                   device_type="cuda", active_if=TEST_CUDNN,
+                   dtypes=(torch.bfloat16, torch.float16)),
            ),
            supports_out=False,),
     OpInfo('nn.functional.conv1d',
@@ -11871,6 +11879,8 @@ op_db: List[OpInfo] = [
                          device_type='cuda', dtypes=(torch.bfloat16,)),
             DecorateInfo(unittest.skip("Skipped!"), 'TestSchemaCheckModeOpInfo',
                          'test_schema_correctness', device_type='cuda', dtypes=(torch.bfloat16,)),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestTorchFunctionRedispatchOps', 'test_redispatch',
+                         device_type='cuda', dtypes=(torch.bfloat16,)),
             # Doesn't support autocasting
             DecorateInfo(unittest.skip("Skipped!"), 'TestFakeTensorNonErroring', 'test_fake_autocast', device_type='cpu'),
             DecorateInfo(unittest.skip("Skipped!"), 'TestFakeTensor', 'test_fake_autocast'),
@@ -14213,6 +14223,8 @@ op_db: List[OpInfo] = [
                # Empty tensor data is garbage so it's hard to make comparisons with it.
                DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_complex_half_reference_testing'),
                # Empty tensor data is garbage so it's hard to make comparisons with it.
+               DecorateInfo(unittest.skip("Skipped!"), 'TestTorchFunctionRedispatchOps', 'test_redispatch'),
+               # Empty tensor data is garbage so it's hard to make comparisons with it.
                DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_non_standard_bool_values'),
                DecorateInfo(unittest.skip("Expected: empty_like is not comparable"), 'TestCompositeCompliance',
                             'test_operator'),
@@ -14397,6 +14409,8 @@ op_db: List[OpInfo] = [
                             'test_operator'),
                DecorateInfo(unittest.skip("Expected: new_empty is not comparable"),
                             'TestCommon', 'test_complex_half_reference_testing'),
+               # Empty tensor data is garbage so it's hard to make comparisons with it.
+               DecorateInfo(unittest.skip("Skipped!"), 'TestTorchFunctionRedispatchOps', 'test_redispatch'),
            ),
            supports_autograd=False),
     OpInfo('new_empty_strided',
@@ -14446,6 +14460,8 @@ op_db: List[OpInfo] = [
                             'TestCudaFuserOpInfo', 'test_nvfuser_extremal_values'),
                DecorateInfo(unittest.skip("Expected: new_empty_strided is not comparable"),
                             'TestCudaFuserOpInfo', 'test_nvfuser_correctness'),
+               DecorateInfo(unittest.skip("Expected: new_empty_strided is not comparable"),
+                            'TestTorchFunctionRedispatchOps', 'test_redispatch'),
            )),
     OpInfo('empty',
            dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16, torch.chalf),
@@ -14485,6 +14501,8 @@ op_db: List[OpInfo] = [
                             'TestLazyOpInfo'),
                DecorateInfo(unittest.skip("Expected: empty is not comparable"),
                             'TestCommon', 'test_complex_half_reference_testing'),
+               # Empty tensor data is garbage so it's hard to make comparisons with it.
+               DecorateInfo(unittest.skip("Skipped!"), 'TestTorchFunctionRedispatchOps', 'test_redispatch'),
            )),
     OpInfo('eye',
            dtypes=all_types_and_complex_and(torch.bool, torch.half),
@@ -15798,6 +15816,9 @@ op_db: List[OpInfo] = [
             DecorateInfo(unittest.skip("Skipped!"), 'TestMathBits', 'test_neg_view', device_type='cuda'),
             # Not a problem: embedding does weird stuff to its input (it renormalizes)
             DecorateInfo(unittest.skip('Allowed exemption'), 'TestCompositeCompliance', 'test_operator'),
+            # Not a problem: embedding does weird stuff to its input (it renormalizes)
+            DecorateInfo(unittest.skip("Skipped!"), "TestTorchFunctionRedispatchOps", "test_redispatch",
+                         device_type="cuda"),
         ),
         supports_expanded_weight=True,
         supports_out=False,
@@ -15819,6 +15840,8 @@ op_db: List[OpInfo] = [
             DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
             # Not a problem: embedding_bag does weird stuff to its input (it renormalizes)
             DecorateInfo(unittest.skip('Allowed exemption'), 'TestCompositeCompliance', 'test_operator'),
+            DecorateInfo(unittest.skip('Skipped'), 'TestTorchFunctionRedispatchOps', 'test_redispatch',
+                         dtypes=(torch.float16,)),
         ),
         gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
         supports_out=False,
