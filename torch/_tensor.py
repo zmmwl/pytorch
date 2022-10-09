@@ -765,23 +765,6 @@ class Tensor(torch._C._TensorBase):
 
         return Resize.apply(self, tensor.size())
 
-    def split(self, split_size, dim=0):
-        r"""See :func:`torch.split`"""
-        if has_torch_function_unary(self):
-            return handle_torch_function(
-                Tensor.split, (self,), self, split_size, dim=dim
-            )
-        if isinstance(split_size, Tensor):
-            try:
-                split_size = int(split_size)
-            except ValueError:
-                pass
-
-        if isinstance(split_size, int):
-            return torch._VF.split(self, split_size, dim)  # type: ignore[attr-defined]
-        else:
-            return torch._VF.split_with_sizes(self, split_size, dim)
-
     def unique(self, sorted=True, return_inverse=False, return_counts=False, dim=None):
         r"""Returns the unique elements of the input tensor.
 
