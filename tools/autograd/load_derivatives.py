@@ -497,7 +497,12 @@ def create_differentiability_info(
                 "occurrences of 'grad' with 'grads[0]'"
             )
 
-        if only_used_grads_indices and set(used_grads_indices) == {0}:
+        # See NOTE [Native batch norm saved intermediates]
+        if (
+            only_used_grads_indices
+            and set(used_grads_indices) == {0}
+            and defn_name not in ("native_batch_norm", "native_layer_norm")
+        ):
             raise RuntimeError(
                 f"Derivative definition of {defn_name} in derivatives.yaml solely "
                 "refers to 'grads[0]'.  If the first output is indeed the "

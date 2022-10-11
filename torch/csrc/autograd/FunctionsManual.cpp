@@ -5858,7 +5858,7 @@ static Tensor _affine_jvp(
   return input_t;
 }
 
-Tensor batch_norm_jvp(
+std::tuple<Tensor, Tensor, Tensor> batch_norm_jvp(
     const Tensor& input_p,
     const Tensor& input_t,
     const Tensor& weight_p,
@@ -5905,15 +5905,32 @@ Tensor batch_norm_jvp(
   c10::optional<Tensor> result_p = weight_p.defined()
       ? c10::optional<Tensor>((input_p - mean_p) * invstd_p)
       : c10::nullopt;
-  return _affine_jvp(
+  auto out_jvp = _affine_jvp(
       result_p,
       result_t,
       weight_p.defined() ? weight_p.view(view_size) : weight_p,
       weight_t.defined() ? weight_t.view(view_size) : weight_t,
       bias_t.defined() ? bias_t.view(view_size) : bias_t);
+
+  if (train && (input_p.requires_grad() || at::isTensorSubclassLike(input_p))) {
+    // See NOTE [Native batch norm saved intermediates]
+    // When input requires_grad, we may run backward later. And since saved_mean
+    // and saved_invstd are used in backward, we should also compute forward
+    // grads so that the gradient is propagated properly for
+    // forward-over-reverse
+    auto var_t =
+        var_backward(
+            input_t, input_p, dims, /*correction=*/false, /*keepdim=*/true)
+            .sum(dims, /*keepdim=*/false);
+    auto mean_t = input_t.mean(dims, /*keepdim=*/false);
+    auto invstd_t = -0.5 * at::pow(invstd_p.view_as(var_t), 3) * var_t;
+    return std::make_tuple(out_jvp, std::move(mean_t), std::move(invstd_t));
+  } else {
+    return std::make_tuple(out_jvp, Tensor(), Tensor());
+  }
 }
 
-Tensor layer_norm_jvp(
+std::tuple<Tensor, Tensor, Tensor> layer_norm_jvp(
     const Tensor& input_p,
     const Tensor& input_t,
     const Tensor& weight_p,
@@ -5944,12 +5961,27 @@ Tensor layer_norm_jvp(
   c10::optional<Tensor> result_p = weight_p.defined()
       ? c10::optional<Tensor>((input_p - mean_p) * invstd_p)
       : c10::nullopt;
-  return _affine_jvp(
+
+  auto out_jvp = _affine_jvp(
       result_p,
       result_t,
       weight_p.defined() ? weight_p.view(view_size_affine) : weight_p,
       weight_t.defined() ? weight_t.view(view_size_affine) : weight_t,
       bias_t.defined() ? bias_t.view(view_size_affine) : bias_t);
+
+  // See NOTE [Native batch norm saved intermediates]
+  if (input_p.requires_grad() || at::isTensorSubclassLike(input_p)) {
+    auto var_t =
+        var_backward(
+            input_t, input_p, dims, /*correction=*/false, /*keepdim=*/true)
+            .sum(dims, /*keepdim=*/false);
+    auto mean_t = input_t.mean(dims, /*keepdim=*/false).view(view_size);
+    auto invstd_t =
+        (-0.5 * at::pow(invstd_p.view_as(var_t), 3) * var_t).view(view_size);
+    return std::make_tuple(out_jvp, std::move(mean_t), std::move(invstd_t));
+  } else {
+    return std::make_tuple(out_jvp, Tensor(), Tensor());
+  }
 }
 
 Tensor group_norm_jvp(
@@ -5969,19 +6001,19 @@ Tensor group_norm_jvp(
   auto input_t_reshaped = input_t.view({1, N * groups, N ? -1 : 1});
   auto input_p_reshaped = input_p.view({1, N * groups, N ? -1 : 1});
 
-  auto result_t = batch_norm_jvp(
-                      input_p_reshaped,
-                      input_t_reshaped,
-                      /*weight_p=*/{},
-                      /*weight_t=*/{},
-                      /*bias_p=*/{},
-                      /*bias_t=*/{},
-                      /*running_mean=*/{},
-                      /*running_var=*/{},
-                      saved_mean,
-                      saved_invstd,
-                      /*train=*/true,
-                      /*eps=*/0)
+  auto result_t = std::get<0>(batch_norm_jvp(
+                                  input_p_reshaped,
+                                  input_t_reshaped,
+                                  /*weight_p=*/{},
+                                  /*weight_t=*/{},
+                                  /*bias_p=*/{},
+                                  /*bias_t=*/{},
+                                  /*running_mean=*/{},
+                                  /*running_var=*/{},
+                                  saved_mean,
+                                  saved_invstd,
+                                  /*train=*/true,
+                                  /*eps=*/0))
                       .view(input_shape);
 
   c10::optional<Tensor> result_p = c10::nullopt;
