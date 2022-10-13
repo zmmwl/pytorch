@@ -1751,6 +1751,9 @@ static std::tuple<Tensor&, Tensor&> std_var_mean_out(
 
 std::tuple<Tensor, Tensor> var_mean(
     const Tensor& self, at::OptionalIntArrayRef dim, bool unbiased, bool keepdim) {
+  TORCH_WARN_ONCE(
+      "var_mean: The 'unbiased' parameter is deprecated in favor of 'correction'. "
+      "Use correction=1 for Bessel's correction.");
   return at::var_mean(
       self, /*dim=*/at::OptionalIntArrayRef(dim),
       /*correction=*/c10::make_optional<int64_t>({unbiased ? 1 : 0}),
@@ -1759,6 +1762,9 @@ std::tuple<Tensor, Tensor> var_mean(
 
 std::tuple<Tensor, Tensor> std_mean(
     const Tensor& self, at::OptionalIntArrayRef dim, bool unbiased, bool keepdim) {
+  TORCH_WARN_ONCE(
+      "std_mean: The 'unbiased' parameter is deprecated in favor of 'correction'. "
+      "Use correction=1 for Bessel's correction.");
   return at::std_mean(
       self, /*dim=*/at::OptionalIntArrayRef(dim),
       /*correction=*/c10::make_optional<int64_t>({unbiased ? 1 : 0}),
@@ -1766,12 +1772,18 @@ std::tuple<Tensor, Tensor> std_mean(
 }
 
 std::tuple<Tensor, Tensor> std_mean(const Tensor& self, bool unbiased) {
+  TORCH_WARN_ONCE(
+      "std_mean: The 'unbiased' parameter is deprecated in favor of 'correction'. "
+      "Use correction=1 for Bessel's correction.");
   return at::std_mean(
       self, /*dim=*/c10::nullopt,
       /*correction=*/c10::make_optional<int64_t>({unbiased ? 1 : 0}));
 }
 
 std::tuple<Tensor, Tensor> var_mean(const Tensor& self, bool unbiased) {
+  TORCH_WARN_ONCE(
+      "var_mean: The 'unbiased' parameter is deprecated in favor of 'correction'. "
+      "Use correction=1 for Bessel's correction.");
   return at::var_mean(
       self, /*dim=*/c10::nullopt,
       /*correction=*/c10::make_optional<int64_t>({unbiased ? 1 : 0}));
@@ -1808,12 +1820,18 @@ std::tuple<Tensor, Tensor> std_mean(
 }
 
 Tensor var(const Tensor& self, bool unbiased) {
+  TORCH_WARN_ONCE(
+      "var: The 'unbiased' parameter is deprecated in favor of 'correction'. "
+      "Use correction=1 for Bessel's correction.");
   return at::var(
       self, /*dim=*/c10::nullopt,
       /*correction=*/c10::make_optional<int64_t>({unbiased ? 1 : 0}));
 }
 
 Tensor var(const Tensor& self, at::OptionalIntArrayRef dim, bool unbiased, bool keepdim) {
+  TORCH_WARN_ONCE(
+      "var: The 'unbiased' parameter is deprecated in favor of 'correction'. "
+      "Use correction=1 for Bessel's correction.");
   return at::var(
       self, /*dim=*/at::OptionalIntArrayRef(dim),
       /*correction=*/c10::make_optional<int64_t>({unbiased ? 1 : 0}),
@@ -1821,6 +1839,9 @@ Tensor var(const Tensor& self, at::OptionalIntArrayRef dim, bool unbiased, bool 
 }
 
 Tensor& var_out(const Tensor& self, at::OptionalIntArrayRef dim, bool unbiased, bool keepdim, Tensor& result) {
+  TORCH_WARN_ONCE(
+      "var: The 'unbiased' parameter is deprecated in favor of 'correction'. "
+      "Use correction=1 for Bessel's correction.");
   return at::var_out(
       result, self, /*dim=*/at::OptionalIntArrayRef(dim),
       /*correction=*/c10::make_optional<int64_t>({unbiased ? 1 : 0}),
@@ -1828,16 +1849,25 @@ Tensor& var_out(const Tensor& self, at::OptionalIntArrayRef dim, bool unbiased, 
 }
 
 Tensor std(const Tensor& self, bool unbiased) {
+  TORCH_WARN_ONCE(
+      "std: The 'unbiased' parameter is deprecated in favor of 'correction'. "
+      "Use correction=1 for Bessel's correction.");
   return at::std(
       self, /*dim=*/c10::nullopt, /*correction=*/c10::make_optional<int64_t>({unbiased ? 1 : 0}));
 }
 
 Tensor std(const Tensor& self, at::OptionalIntArrayRef dim, bool unbiased, bool keepdim) {
+  TORCH_WARN_ONCE(
+      "std: The 'unbiased' parameter is deprecated in favor of 'correction'. "
+      "Use correction=1 for Bessel's correction.");
   return at::std(self, dim,
                  /*correction=*/c10::make_optional<int64_t>({unbiased ? 1 : 0}), keepdim);
 }
 
 Tensor& std_out(const Tensor& self, at::OptionalIntArrayRef opt_dim, bool unbiased, bool keepdim, Tensor& result) {
+  TORCH_WARN_ONCE(
+      "std: The 'unbiased' parameter is deprecated in favor of 'correction'. "
+      "Use correction=1 for Bessel's correction.");
   return at::std_out(result, self, opt_dim,
                      /*correction=*/c10::make_optional<int64_t>({unbiased ? 1 : 0}), keepdim);
 }
