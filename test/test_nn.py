@@ -2234,7 +2234,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         def compare_scaling(grads):
             p_scale = [p.grad.data.div(g).view(-1) for p, g in zip(l.parameters(), grads)]
             scale = torch.cat(p_scale)
-            self.assertEqual(scale.std(), 0)
+            self.assertEqual(scale.std(correction=1), 0)
             return scale[0]
 
         grads = torch.arange(1., 101).view(10, 10), torch.ones(10).div(1000)
