@@ -29,13 +29,42 @@ def register_meta(op, register_dispatcher=True):
     def wrapper(f):
         def add_func(op):
             meta_table[op] = f
-            if register_dispatcher:
-                name = (
-                    op.__name__
-                    if op._overloadname != "default"
-                    else op.overloadpacket.__name__
-                )
-                _meta_lib_dont_use_me_use_register_meta.impl(name, f)
+
+            overloads = []
+            if isinstance(op, torch._ops.OpOverload):
+                overloads.append(op)
+            else:
+                assert isinstance(op, torch._ops.OpOverloadPacket)
+                for ol in op.overloads():
+                    overloads.append(getattr(op, ol))
+
+            for op_overload in overloads:
+                name = op_overload._schema.name
+                if op_overload._schema.overload_name:
+                    name += "." + op_overload._schema.overload_name
+
+                if (
+                    # TorchScript dumps a bunch of extra nonsense overloads
+                    # which don't have corresponding dispatcher entries, we need
+                    # to filter those out
+                    torch._C._dispatch_has_kernel(name)
+                    # Don't register a python meta kernel to any operator that has
+                    # should already work with meta tensors today.
+                    # We can check that by seeing if the "computed table" for the operator
+                    # has a registration to Meta;
+                    # either through a direct registration, or an indirect one through
+                    # an alias dispatch key (e.g. CompositeImplicitAutograd)
+                    and not torch._C._dispatch_has_computed_kernel_for_dispatch_key(
+                        name, "Meta"
+                    )
+                ):
+                    assert register_dispatcher == True
+                    _meta_lib_dont_use_me_use_register_meta.impl(op_overload, f)
+
+                else:
+                    if register_dispatcher:
+                        pass
+                        # print(f"WARNING: {name} has c++ meta impl, but register_dispatcher is {register_dispatcher}")
 
             op.py_impl(torch._C.DispatchKey.Meta)(f)
 
@@ -1605,6 +1634,18 @@ def upsample_nearest2d_vec(input, output_size, scale_factors):
     return input.new_empty((nbatch, channels, output_height, output_width)).to(
         memory_format=mem_format
     )
+
+# this is needed to work around
+# "NotImplementedError: convolution_overrideable not implemented.
+# You are likely triggering this with tensor backend other than CPU/CUDA/MKLDNN,
+# if this is intended, please use TORCH_LIBRARY_IMPL to override this function "
+# when running `python test/test_meta.py -k test_dispatch_meta_nn_functional_conv2d_cuda_float32`
+_meta_lib_dont_use_me_use_register_meta.impl(aten.convolution.default, meta_conv)
+
+# this is needed to work around
+# TypeError: meta_nanmedian_dim() got an unexpected keyword argument 'values'
+# repro with `python test/test_meta.py -k test_dispatch_meta_nanmedian_cpu_float32`
+_meta_lib_dont_use_me_use_register_meta.impl(aten.nanmedian.dim, meta_nanmedian_dim)
 
 
 # We must also trigger meta registrations from PrimTorch ref
