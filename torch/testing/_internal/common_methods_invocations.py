@@ -11627,11 +11627,11 @@ op_db: List[OpInfo] = [
             # AssertionError: JIT Test does not execute any logic
             DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
             # This test fails on trunk CUDA 10.2 tests, can be removed when we stop 10.2 support
-            DecorateInfo(unittest.skip("Skipped!"), 'TestMeta', 'test_meta',
+            DecorateInfo(unittest.skip("Skipped!"), 'TestMeta', 'test_meta_outplace',
                          device_type='cuda', dtypes=(torch.bfloat16,)),
-            DecorateInfo(unittest.skip("Not Implemented"), 'TestMeta', 'test_dispatch_meta',
+            DecorateInfo(unittest.skip("Not Implemented"), 'TestMeta', 'test_dispatch_meta_outplace',
                          device_type='cuda', dtypes=(torch.bfloat16,)),
-            DecorateInfo(unittest.skip("Not Implemented"), 'TestMeta', 'test_symbolic_dispatch_meta',
+            DecorateInfo(unittest.skip("Not Implemented"), 'TestMeta', 'test_symbolic_dispatch_meta_outplace',
                          device_type='cuda', dtypes=(torch.bfloat16,)),
             DecorateInfo(unittest.skip("Skipped!"), 'TestSchemaCheckModeOpInfo',
                          'test_schema_correctness', device_type='cuda', dtypes=(torch.bfloat16,)),
@@ -11916,7 +11916,7 @@ op_db: List[OpInfo] = [
             DecorateInfo(
                 unittest.skip("Skipped!"),
                 "TestMeta",
-                "test_meta",
+                "test_meta_outplace",
             ),
             # https://github.com/pytorch/pytorch/issues/84335
             DecorateInfo(
@@ -12257,8 +12257,8 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out'),
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning'),
                # Not implemented
-               DecorateInfo(unittest.expectedFailure, 'TestMeta', 'test_meta', device_type='cuda'),
-               DecorateInfo(unittest.expectedFailure, 'TestMeta', 'test_dispatch_meta', device_type='cuda'),
+               DecorateInfo(unittest.expectedFailure, 'TestMeta', 'test_meta_outplace', device_type='cuda'),
+               DecorateInfo(unittest.expectedFailure, 'TestMeta', 'test_dispatch_meta_outplace', device_type='cuda'),
                DecorateInfo(unittest.expectedFailure, 'TestMeta', 'test_dispatch_symbolic_meta', device_type='cuda'),
            )),
     UnaryUfuncInfo('neg',
