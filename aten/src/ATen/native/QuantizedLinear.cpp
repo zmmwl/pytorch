@@ -24,7 +24,7 @@
 #endif // USE_FBGEMM
 
 namespace caffe2 {
-CAFFE_KNOWN_TYPE(c10::intrusive_ptr<LinearPackedParamsBase>);
+CAFFE_DEFINE_KNOWN_TYPE(c10::intrusive_ptr<LinearPackedParamsBase>);
 } // namespace caffe2
 
 #ifdef USE_FBGEMM
