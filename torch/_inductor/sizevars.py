@@ -342,8 +342,7 @@ class SizeVarAllocator(object):
             # can prove it symbolically
             return True
         if self.size_hint(numerator) % self.size_hint(denominator) == 0:
-            multiple = self.size_hint(numerator) // self.size_hint(denominator)
-            self.guard_equals(multiple * denominator, numerator)
+            self.guard_equals(numerator % denominator, 0)
             return True
         return False
 
@@ -454,6 +453,11 @@ class SizeVarAllocator(object):
             code.writeline(f"{name}_stride = {name}.stride()")
             return f"{name}_stride"
 
+        @functools.lru_cache(None)
+        def storageoffsetof(name):
+            code.writeline(f"{name}_storage_offset = {name}.storage_offset()")
+            return f"{name}_storage_offset"
+
         # Assign all symbolic shapes needed to local variables
         needed = set(self.var_to_val.keys()) - set(self.replacements.keys())
         added = set()
@@ -475,9 +479,20 @@ class SizeVarAllocator(object):
                 shape = self.simplify(shape)
                 if shape in needed:
                     needed.remove(shape)
+                    added.add(shape)
                     code.writeline(f"{shape} = {strideof(name)}[{dim}]")
                 elif isinstance(shape, sympy.Symbol):
                     assert shape in added, f"{shape} is needed but not added"
+
+        for name, value in graph_inputs.items():
+            offset = value.data.get_layout().offset
+            if offset in needed:
+                needed.remove(offset)
+                added.add(shape)
+                code.writeline(f"{offset} = {storageoffsetof(name)}")
+            elif isinstance(shape, sympy.Symbol):
+                assert shape in added, f"{shape} is needed but not added"
+
         assert not needed
 
     def codegen_sizevar(self, x: Expr) -> str:
