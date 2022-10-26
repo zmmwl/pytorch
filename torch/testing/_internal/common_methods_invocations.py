@@ -16568,6 +16568,9 @@ python_ref_db = [
         aliases=('moveaxis',),
         torch_opinfo_name="movedim",
         supports_nvfuser=False,
+        skips=(
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_errors'),
+        ),
     ),
     PythonRefInfo(
         "_refs.bucketize",
@@ -16763,6 +16766,9 @@ python_ref_db = [
     ElementwiseUnaryPythonRefInfo(
         "_refs.neg",
         torch_opinfo_name="neg",
+        skips=(
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_errors'),
+        ),
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.positive",
@@ -16975,10 +16981,16 @@ python_ref_db = [
     PythonRefInfo(
         "_refs.nn.functional.poisson_nll_loss",
         torch_opinfo_name="nn.functional.poisson_nll_loss",
+        skips=(
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_errors'),
+        ),
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.nn.functional.prelu",
         torch_opinfo_name="nn.functional.prelu",
+        skips=(
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_errors'),
+        ),
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.nn.functional.relu",
@@ -17697,6 +17709,9 @@ python_ref_db = [
         "_refs.dsplit",
         torch_opinfo_name="dsplit",
         supports_nvfuser=False,
+        skips=(
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_errors'),
+        ),
     ),
     PythonRefInfo(
         "_refs.diag",
@@ -17722,6 +17737,9 @@ python_ref_db = [
         "_refs.dstack",
         torch_opinfo_name="dstack",
         supports_nvfuser=False,
+        skips=(
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_errors'),
+        ),
     ),
     PythonRefInfo(
         "_refs.expand",
@@ -17806,6 +17824,9 @@ python_ref_db = [
         "_refs.reshape",
         torch_opinfo_name="reshape",
         supports_nvfuser=False,
+        skips=(
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_errors'),
+        ),
     ),
     PythonRefInfo(
         "_refs.reshape_as",
@@ -17854,6 +17875,9 @@ python_ref_db = [
         "_refs.vsplit",
         torch_opinfo_name="vsplit",
         supports_nvfuser=False,
+        skips=(
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_errors'),
+        ),
     ),
     PythonRefInfo(
         "_refs.transpose",
@@ -17887,6 +17911,9 @@ python_ref_db = [
         "_refs.view",
         torch_opinfo_name="view",
         supports_nvfuser=False,
+        skips=(
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_errors'),
+        ),
     ),
     PythonRefInfo(
         "_refs.view_as",
@@ -17911,6 +17938,9 @@ python_ref_db = [
         "_refs.unbind",
         torch_opinfo_name="unbind",
         supports_nvfuser=False,
+        skips=(
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_errors'),
+        ),
     ),
     #
     # Reduction Reference OpInfos
@@ -17922,10 +17952,16 @@ python_ref_db = [
     ReductionPythonRefInfo(
         "_refs.amax",
         torch_opinfo_name="amax",
+        skips=(
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_errors'),
+        ),
     ),
     ReductionPythonRefInfo(
         "_refs.amin",
         torch_opinfo_name="amin",
+        skips=(
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_errors'),
+        ),
     ),
     ReductionPythonRefInfo(
         "_refs.any",
@@ -17935,6 +17971,9 @@ python_ref_db = [
         "_refs.mean",
         torch_opinfo_name="mean",
         supports_out=True,
+        skips=(
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_errors'),
+        ),
     ),
     ReductionPythonRefInfo(
         "_refs.std",
@@ -18213,12 +18252,18 @@ python_ref_db = [
         "_refs.masked_fill",
         torch_opinfo_name="masked_fill",
         supports_nvfuser=False,
+        skips=(
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_errors'),
+        ),
     ),
     PythonRefInfo(
         "_refs.where",
         torch_opinfo_name="where",
         op=lambda self, condition, other: refs.where(condition, self, other),
         supports_nvfuser=False,
+        skips=(
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_errors', device_type='cuda'),
+        ),
     ),
     PythonRefInfo(
         "_refs.index_select",
