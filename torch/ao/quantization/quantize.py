@@ -32,9 +32,7 @@ from torch.ao.quantization.observer import _is_activation_post_process
 __all__ = [
     "get_default_custom_config_dict",
     "propagate_qconfig_",
-    "register_activation_post_process_hook",
     "add_observer_",
-    "get_unique_devices_",
     "add_quant_dequant",
     "prepare",
     "quantize",
@@ -43,7 +41,6 @@ __all__ = [
     "quantize_qat",
     "convert",
     "swap_module",
-    "get_observer_dict",
 ]
 
 _DEFAULT_CUSTOM_CONFIG_DICT = {
@@ -134,7 +131,7 @@ def _observer_forward_pre_hook(self, input):
     """
     return self.activation_post_process(input[0])
 
-def register_activation_post_process_hook(module, pre_hook=False):
+def _register_activation_post_process_hook(module, pre_hook=False):
     assert hasattr(module, 'activation_post_process'), \
         'Expect activation_post_process attribute already attached to the module'
     if pre_hook:
@@ -169,7 +166,7 @@ def add_observer_(module, qconfig_propagation_list=None, non_leaf_module_list=No
 
     # respect device affinity when adding observers
     if device is None:
-        devices = get_unique_devices_(module)
+        devices = _get_unique_devices_(module)
         assert len(devices) <= 1, (
             "add_observer_ only works with cpu or single-device CUDA modules, "
             "but got devices {}".format(devices)
@@ -196,7 +193,7 @@ def add_observer_(module, qconfig_propagation_list=None, non_leaf_module_list=No
                 m.qconfig, device, special_act_post_process))
             # Register observer as the first entry in the hook list
             # All post forward hooks are preserved and will be executed after the observer before convert
-            register_activation_post_process_hook(m, pre_hook=_activation_is_memoryless(m.qconfig))
+            _register_activation_post_process_hook(m, pre_hook=_activation_is_memoryless(m.qconfig))
 
     for name, child in module.named_children():
         # TODO remove Dropout special after codebase stable
@@ -231,7 +228,7 @@ def add_observer_(module, qconfig_propagation_list=None, non_leaf_module_list=No
        and type_before_parametrizations(module) in qconfig_propagation_list:
         insert_activation_post_process(module)
 
-def get_unique_devices_(module):
+def _get_unique_devices_(module):
     return {p.device for p in module.parameters()} | \
         {p.device for p in module.buffers()}
 
@@ -632,7 +629,7 @@ def swap_module(mod, mapping, custom_module_class_mapping):
                     new_mod.register_forward_hook(hook_fn)
 
             # respect device affinity when swapping modules
-            devices = get_unique_devices_(mod)
+            devices = _get_unique_devices_(mod)
             assert len(devices) <= 1, (
                 "swap_module only works with cpu or single-device CUDA modules, "
                 "but got devices {}".format(devices)
@@ -642,7 +639,7 @@ def swap_module(mod, mapping, custom_module_class_mapping):
                 new_mod.to(device)
     return new_mod
 
-def get_observer_dict(mod, target_dict, prefix=""):
+def _get_observer_dict(mod, target_dict, prefix=""):
     r"""Traverse the modules and save all observers into dict.
     This is mainly used for quantization accuracy debug
     Args:
@@ -657,4 +654,4 @@ def get_observer_dict(mod, target_dict, prefix=""):
         target_dict[get_prefix(prefix) + 'activation_post_process'] = mod.activation_post_process
     for name, child in mod.named_children():
         module_prefix = get_prefix(prefix) + name if prefix else name
-        get_observer_dict(child, target_dict, module_prefix)
+        _get_observer_dict(child, target_dict, module_prefix)
