@@ -14,3 +14,6 @@ FullyShardedDataParallel
 
 .. autoclass:: torch.distributed.fsdp.MixedPrecision
   :members:
+
+.. autoclass:: torch.distributed.fsdp.CPUOffload
+  :members:

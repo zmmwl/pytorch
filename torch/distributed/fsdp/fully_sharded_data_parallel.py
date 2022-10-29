@@ -38,7 +38,12 @@ from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
 )
 from torch.distributed.algorithms._comm_hooks import default_hooks, LOW_PRECISION_HOOKS
 from torch.distributed.distributed_c10d import _get_default_group
-from torch.distributed.fsdp import BackwardPrefetch, MixedPrecision, ShardingStrategy
+from torch.distributed.fsdp import (
+    BackwardPrefetch,
+    CPUOffload,
+    MixedPrecision,
+    ShardingStrategy,
+)
 from torch.distributed.fsdp._common_utils import HandleTrainingState, TrainingState
 from torch.distributed.fsdp._runtime_utils import (
     _clear_grads_if_needed,
@@ -123,20 +128,6 @@ FSDP_PREFIX = FSDP_WRAPPED_MODULE + "."
 FLAT_PARAM = "_flat_param"
 
 _PARAM_BROADCAST_BUCKET_SIZE = int(250 * 1024 * 1024)
-
-
-@dataclass
-class CPUOffload:
-    """
-    CPU offloading config. Currently, only parameter and gradient CPU
-    offload are supported.
-    offload_params: Offloading parameters to CPUs when these parameters are
-                    not used for computation on GPUs. This implicitly enables
-                    gradient offloading to CPUs in order for parameters and
-                    gradients to be on the same device to work with optimizer.
-    """
-
-    offload_params: bool = False
 
 
 class StateDictType(Enum):
