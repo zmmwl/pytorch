@@ -11,3 +11,6 @@ FullyShardedDataParallel
 
 .. autoclass:: torch.distributed.fsdp.ShardingStrategy
   :members:
+
+.. autoclass:: torch.distributed.fsdp.MixedPrecision
+  :members:

@@ -1,11 +1,10 @@
-from .api import BackwardPrefetch, ShardingStrategy
+from .api import BackwardPrefetch, MixedPrecision, ShardingStrategy
 from .flat_param import FlatParameter
 from .fully_sharded_data_parallel import (
     CPUOffload,
     FullStateDictConfig,
     FullyShardedDataParallel,
     LocalStateDictConfig,
-    MixedPrecision,
     OptimStateKeyType,
     ShardedStateDictConfig,
     StateDictType,
