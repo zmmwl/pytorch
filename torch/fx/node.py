@@ -30,7 +30,6 @@ Argument = Optional[Union[
 
 _side_effectful_functions: Set[Callable] = {
     torch._assert,
-    torch.ops.profiler._record_function_enter,
     torch.ops.profiler._record_function_enter_new,
     torch.ops.profiler._record_function_exit}
 
