@@ -76,7 +76,7 @@ class TestONNXExport(common_utils.TestCase):
 
         x = torch.ones(3, 3)
         f = io.BytesIO()
-        torch.onnx._export(AddmmModel(), x, f, verbose=False)
+        torch.onnx.export(AddmmModel(), x, f, verbose=False)
 
     def test_onnx_transpose_incomplete_tensor_type(self):
         # Smoke test to get us into the state where we are attempting to export
@@ -163,7 +163,7 @@ class TestONNXExport(common_utils.TestCase):
         mte = ModuleToExport()
         f = io.BytesIO()
         with self.assertRaisesRegex(RuntimeError, "Couldn't export Python"):
-            torch.onnx._export(mte, (torch.zeros(1, 2, 3),), f, verbose=False)
+            torch.onnx.export(mte, (torch.zeros(1, 2, 3),), f, verbose=False)
 
     def test_onnx_export_script_inline_trace(self):
         class ModuleToInline(torch.nn.Module):
@@ -541,7 +541,7 @@ class TestONNXExport(common_utils.TestCase):
 
         x = torch.randn(32, 3)
         f = io.BytesIO()
-        torch.onnx._export(test_model, (x,), f, do_constant_folding=False)
+        torch.onnx.export(test_model, (x,), f, do_constant_folding=False)
         loaded_model = onnx.load_from_string(f.getvalue())
 
         actual_list = [p.name for p in loaded_model.graph.initializer]
