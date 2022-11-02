@@ -35,6 +35,8 @@ __all__ = [
     "hinge_embedding_loss",
     "huber_loss",
     "l1_loss",
+    "layer_norm",
+    "leaky_relu",
     "log_softmax",
     "margin_ranking_loss",
     "mish",
@@ -45,13 +47,16 @@ __all__ = [
     "relu",
     "relu6",
     "selu",
+    "sigmoid",
     "softmax",
     "softmin",
     "softplus",
     "softshrink",
+    "tanh",
     "tanhshrink",
     "threshold",
     "triplet_margin_loss",
+    "gelu",
     "glu",
     "pairwise_distance",
     "pdist",
@@ -255,6 +260,9 @@ def softmax(
     # users how to update their calls.
     check(dim is not None, lambda: "implicit dim not supported, use dim=X")
     return torch.softmax(a=a, dim=dim, dtype=dtype)  # type: ignore[call-overload]
+
+
+sigmoid = torch.sigmoid  # alias
 
 
 # CompositeImplicitAutograd - don't register decomp
@@ -669,6 +677,9 @@ def huber_loss(
     z = (input - target).abs()
     loss = torch.where(z < delta, 0.5 * z * z, delta * (z - 0.5 * delta))
     return _apply_loss_reduction(loss, reduction)  # type: ignore[arg-type]
+
+
+tanh = torch.tanh  # alias
 
 
 # tanhshrink does not use _make_elementwise_unary_reference because it does not support out

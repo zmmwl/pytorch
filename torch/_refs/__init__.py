@@ -52,8 +52,16 @@ __all__ = [
     # Elementwise Unary References
     #
     "abs",
+    "absolute",
     "acos",
     "acosh",
+    "arccos",
+    "arccosh",
+    "arcsin",
+    "arcsinh",
+    "arctan2",
+    "arctan",
+    "arctanh",
     "asinh",
     "asin",
     "atan",
@@ -61,6 +69,8 @@ __all__ = [
     "bitwise_not",
     # "cbrt",  # No corresponding torch operation
     "ceil",
+    "clamp_max",
+    "clamp_min",
     "conj_physical",
     "cos",
     "cosh",
@@ -72,6 +82,7 @@ __all__ = [
     "expm1",
     "exp2",
     "fill",
+    "fix",
     "floor",
     "frac",
     "index_add",
@@ -83,6 +94,8 @@ __all__ = [
     "isfinite",
     "isinf",
     "isnan",
+    "isneginf",
+    "isposinf",
     "isreal",
     "i0",
     "lgamma",
@@ -91,8 +104,12 @@ __all__ = [
     "log2",
     "log10",
     "log_softmax",
+    "logit",
+    "logsumexp",
+    "mvlgamma",
     "nan_to_num",
     "neg",
+    "negative",
     "positive",
     "reciprocal",
     "round",  # TODO: model kwargs
@@ -124,6 +141,7 @@ __all__ = [
     # "complex",
     "copysign",
     "div",
+    "divide",
     "eq",
     "float_power",
     "floor_divide",
@@ -132,6 +150,8 @@ __all__ = [
     "fmod",
     "gcd",
     "ge",
+    "greater",
+    "greater_equal",
     "gt",
     "heaviside",
     "hypot",
@@ -142,6 +162,8 @@ __all__ = [
     "lcm",
     # 'ldexp',
     "le",
+    "less",
+    "less_equal",
     "logical_and",
     "logical_not",
     "logical_or",
@@ -152,6 +174,8 @@ __all__ = [
     # 'min', # implement with reductions
     "minimum",
     "mul",
+    "multiply",
+    "not_equal",
     "ne",
     "nextafter",
     # 'polar',  # abs, cos, sin
@@ -163,6 +187,7 @@ __all__ = [
     "rtruediv",
     "rfloordiv",
     "sub",
+    "subtract",
     "true_divide",
     "trunc_divide",
     "xlogy",
@@ -172,6 +197,7 @@ __all__ = [
     "addcdiv",
     "addcmul",
     "clamp",
+    "clip",
     #
     # Conditional references
     #
@@ -191,7 +217,9 @@ __all__ = [
     "amax",
     "amin",
     "any",
+    "cumsum",
     "mean",
+    "std",
     "std_mean",
     "var_mean",
     "sum",
@@ -202,6 +230,7 @@ __all__ = [
     # Linear algebra ops
     #
     "addr",
+    "norm",
     #
     # View & Shape Ops
     #
@@ -213,6 +242,8 @@ __all__ = [
     "broadcast_tensors",
     "broadcast_to",
     "cat",
+    "concat",
+    "concatenate",
     "chunk",
     "column_stack",
     "conj",
@@ -233,7 +264,9 @@ __all__ = [
     "flipud",
     "hsplit",
     "hstack",
+    "layer_norm",
     "meshgrid",
+    "moveaxis",
     "movedim",
     "narrow",
     "narrow_copy",
@@ -242,11 +275,14 @@ __all__ = [
     "ravel",
     "repeat",
     "reshape",
+    "reshape_as",
     "roll",
     "rot90",
+    "row_stack",
     "rsqrt",
     "stack",
-    "swap_axes",  # alias for transpose
+    "swapaxes",
+    "swapdims",
     "squeeze",
     "t",
     "T",
@@ -256,6 +292,7 @@ __all__ = [
     "unfold_copy",
     "unsqueeze",
     "view",
+    "view_as",
     "vsplit",
     "vstack",
     "unflatten",
@@ -276,6 +313,11 @@ __all__ = [
     "full_like",
     "linspace",
     "logspace",
+    "new_empty",
+    "new_empty_strided",
+    "new_full",
+    "new_ones",
+    "new_zeros",
     "ones",
     "ones_like",
     "randn",
@@ -418,9 +460,15 @@ def abs(a):
     return prims.abs(a)
 
 
+absolute = torch.abs  # alias
+
+
 @_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT)
 def acos(a):
     return prims.acos(a)
+
+
+arccos = torch.acos  # alias
 
 
 @_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT)
@@ -428,9 +476,15 @@ def acosh(a):
     return prims.acosh(a)
 
 
+arccosh = torch.acosh  # alias
+
+
 @_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT)
 def asin(a):
     return prims.asin(a)
+
+
+arcsin = torch.asin  # alias
 
 
 @_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT)
@@ -438,14 +492,23 @@ def asinh(a):
     return prims.asinh(a)
 
 
+arcsinh = torch.asinh  # alias
+
+
 @_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT)
 def atan(a):
     return prims.atan(a)
 
 
+arctan = torch.atan  # alias
+
+
 @_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT)
 def atanh(a):
     return prims.atanh(a)
+
+
+arctanh = torch.atanh  # alias
 
 
 @_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT)
@@ -633,10 +696,6 @@ def lgamma(a):
     return prims.lgamma(a)
 
 
-# alias
-mvlgamma = torch.special.multigammaln  # type: ignore[has-type]
-
-
 @_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT)
 def log(a):
     return prims.log(a)
@@ -650,6 +709,10 @@ def log1p(a):
 @_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT)
 def log2(a):
     return prims.log2(a)
+
+
+# alias
+logit = torch.special.logit  # type: ignore[has-type]
 
 
 @_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT)
@@ -690,6 +753,18 @@ def logsumexp(
         # This case covers boolean and integer dtypes and we use non-stabilized computation
         result = log(sum(exp(a), dim, keepdim=keepdim))
     return result
+
+
+@register_decomposition(torch.ops.aten.mvlgamma)
+@out_wrapper()
+@elementwise_type_promotion_wrapper(
+    type_promoting_args=("a",),
+    type_promotion_kind=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
+)
+def mvlgamma(a: TensorLikeType, p: int) -> TensorLikeType:
+    c = 0.25 * p * (p - 1) * math.log(math.pi)
+    b = 0.5 * torch.arange(start=(1 - p), end=1, step=1, dtype=a.dtype, device=a.device)
+    return torch.sum(torch.lgamma(a.unsqueeze(-1) + b), dim=-1) + c
 
 
 @register_decomposition(torch.ops.aten.nan_to_num)
@@ -736,6 +811,9 @@ def _neg_meta(a: TensorLikeType):
 )
 def neg(a):
     return prims.neg(a)
+
+
+negative = torch.neg  # alias
 
 
 # positive does not use _make_elementwise_unary_reference because it does not support out
@@ -804,12 +882,8 @@ def sin(a):
     return prims.sin(a)
 
 
-# Autograd note: This will give the right first derivative at zero (by chance),
-# but not the right second derivative
-@_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT)
-def sinc(a):
-    a = math.pi * a
-    return torch.where(a == 0, 1, torch.sin(a) / a)
+# alias
+sinc = torch.special.sinc  # type: ignore[has-type]
 
 
 @_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT)
@@ -843,6 +917,9 @@ def tanh(a):
 @_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT)
 def trunc(a):
     return prims.trunc(a)
+
+
+fix = torch.trunc  # alias
 
 
 def _make_elementwise_binary_reference(
@@ -940,6 +1017,10 @@ atan2 = _make_elementwise_binary_reference(
     supports_rhs_python_scalar=False,
 )
 
+
+arctan2 = torch.atan2  # alias
+
+
 # TODO: add docstring
 bitwise_and = _make_elementwise_binary_reference(
     prims.bitwise_and,  # type: ignore[has-type]
@@ -1021,6 +1102,9 @@ def div(
             "but found {0}.".format(rounding_mode)
         )
         raise ValueError(msg)
+
+
+divide = torch.div  # alias
 
 
 # TODO: add docstring
@@ -1231,12 +1315,19 @@ ge = _make_elementwise_binary_reference(
     supports_lhs_python_scalar=False,
 )
 
+
+greater_equal = torch.ge  # alias
+
+
 # TODO: add docstring
 gt = _make_elementwise_binary_reference(
     prims.gt,  # type: ignore[has-type]
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL,
     supports_lhs_python_scalar=False,
 )
+
+
+greater = torch.gt  # alias
 
 
 def _heaviside(input: TensorLikeType, values: TensorLikeType) -> TensorLikeType:
@@ -1383,6 +1474,9 @@ le = _make_elementwise_binary_reference(
 )
 
 
+less_equal = torch.le  # alias
+
+
 def _logical_and(a: TensorLikeType, b: TensorLikeType):
     if not utils.is_boolean_dtype(a.dtype):
         a = a != 0
@@ -1445,6 +1539,10 @@ lt = _make_elementwise_binary_reference(
     supports_lhs_python_scalar=False,
 )
 
+
+less = torch.lt  # alias
+
+
 # TODO: add docstring
 maximum = _make_elementwise_binary_reference(
     prims.maximum,  # type: ignore[has-type]
@@ -1464,12 +1562,20 @@ mul = _make_elementwise_binary_reference(
     supports_two_python_scalars=True,
 )
 
+
+multiply = torch.mul  # alias
+
+
 # TODO: add docstring
 ne = _make_elementwise_binary_reference(
     prims.ne,  # type: ignore[has-type]
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL,
     supports_lhs_python_scalar=False,
 )
+
+
+not_equal = torch.ne  # alias
+
 
 # TODO: add docstring
 nextafter = _make_elementwise_binary_reference(
@@ -1533,6 +1639,9 @@ def sub(
         b = prims.mul(b, alpha)
 
     return prims.sub(a, b)
+
+
+subtract = torch.sub  # alias
 
 
 # TODO: add docstring
@@ -1682,6 +1791,9 @@ def clamp(
         a = torch.where(condition, a, max)  # type: ignore[arg-type]
 
     return a
+
+
+clip = torch.clamp  # alias
 
 
 @register_decomposition(torch.ops.aten.clamp_min)
@@ -2513,6 +2625,12 @@ def cat(tensors: TensorSequenceType, dim: int = 0) -> TensorLikeType:
     return prims.cat(filtered, dim)
 
 
+concat = torch.cat  # alias
+
+
+concatenate = torch.cat  # alias
+
+
 # CompositeImplicitAutograd - don't register decomp
 @out_wrapper()
 def column_stack(tensors: TensorSequenceType) -> TensorLikeType:
@@ -2845,6 +2963,9 @@ def native_layer_norm(
         mean = _maybe_convert_to_dtype(mean, input.dtype)  # type: ignore[assignment]
         rstd = _maybe_convert_to_dtype(rstd, input.dtype)  # type: ignore[assignment]
     return (out, mean, rstd)
+
+
+layer_norm = torch.nn.functional.layer_norm  # alias
 
 
 # TODO: Adding this as a meta function causes functorch tests to fail when compiled with debug mode.
@@ -3202,6 +3323,9 @@ def vstack(tensors: TensorSequenceType) -> TensorLikeType:
     return cat(aligned_tensors, 0)
 
 
+row_stack = torch.vstack  # alias
+
+
 # CompositeImplicitAutograd - don't register decomp
 def unflatten(a: TensorLikeType, dim: int, sizes: ShapeType) -> TensorLikeType:
     dim = utils.canonicalize_dim(a.ndim, dim)
@@ -3527,7 +3651,7 @@ def diagonal_scatter(
 
 @register_decomposition(torch.ops.aten.diagonal)
 def diagonal(
-    self: TensorLikeType,
+    input: TensorLikeType,
     offset: int = 0,
     dim1: int = 0,
     dim2: int = 1,
@@ -3535,7 +3659,7 @@ def diagonal(
     """
     Reference implementation of torch.diagonal
     """
-    num_dims = self.dim()
+    num_dims = input.dim()
     dim1 = utils.canonicalize_dim(idx=dim1, rank=num_dims)
     dim2 = utils.canonicalize_dim(idx=dim2, rank=num_dims)
 
@@ -3543,26 +3667,26 @@ def diagonal(
         dim1 != dim2, lambda: f"diagonal dimensions cannot be identical {dim1}, {dim2}"
     )
 
-    storage_offset = self.storage_offset()
+    storage_offset = input.storage_offset()
 
     if offset >= 0:
-        diag_size = max(min(self.size()[dim1], self.size()[dim2] - offset), 0)
+        diag_size = max(min(input.size()[dim1], input.size()[dim2] - offset), 0)
     else:
-        diag_size = max(min(self.size()[dim1] + offset, self.size()[dim2]), 0)
+        diag_size = max(min(input.size()[dim1] + offset, input.size()[dim2]), 0)
 
     if diag_size > 0:
         if offset >= 0:
-            storage_offset += offset * self.stride()[dim2]
+            storage_offset += offset * input.stride()[dim2]
         else:
-            storage_offset -= offset * self.stride()[dim1]
+            storage_offset -= offset * input.stride()[dim1]
 
-    sizes = [s for i, s in enumerate(self.size()) if i not in (dim1, dim2)]
+    sizes = [s for i, s in enumerate(input.size()) if i not in (dim1, dim2)]
     sizes.append(diag_size)
 
-    strides = [s for i, s in enumerate(self.stride()) if i not in (dim1, dim2)]
-    strides.append(self.stride()[dim1] + self.stride()[dim2])
+    strides = [s for i, s in enumerate(input.stride()) if i not in (dim1, dim2)]
+    strides.append(input.stride()[dim1] + input.stride()[dim2])
 
-    result = self.as_strided(size=sizes, stride=strides, storage_offset=storage_offset)
+    result = input.as_strided(size=sizes, stride=strides, storage_offset=storage_offset)
 
     return result
 
@@ -3685,8 +3809,10 @@ def transpose(a: TensorLikeType, dim0: int, dim1: int) -> TensorLikeType:
     return torch.permute(a, _permutation)
 
 
-# Aliases for transpose
-swap_axes = transpose
+swapaxes = torch.transpose  # alias
+
+
+swapdims = torch.transpose  # alias
 
 
 @register_decomposition(torch.ops.aten.unfold)
@@ -4317,6 +4443,9 @@ def movedim(
     return result
 
 
+moveaxis = torch.movedim  # alias
+
+
 # NOTE: for convenience, shape can be a tuple of ints or a tuple containing a tuple of ints
 @register_decomposition(torch.ops.aten.empty_strided)
 def empty_strided(
@@ -4595,6 +4724,10 @@ def equal(a: TensorLikeType, b: TensorLikeType) -> bool:
     return item(all(eq(a, b)))  # type: ignore[return-value]
 
 
+# TODO: Cannot register as decomp here due to incompatible signatures between
+# the Python frontend and ATen:
+# https://github.com/pytorch/pytorch/issues/83931
+# Also, torch.norm is deprecated in regular PyTorch.
 @out_wrapper(exact_dtype=True)
 def norm(
     input: TensorLikeType,

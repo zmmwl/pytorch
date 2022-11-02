@@ -1426,7 +1426,7 @@ inplace_symbolic_tensor_failures = {
     xfail('logical_and', ''),  # aten.logical_and_.default - couldn't find symbolic meta function/decomposition
     xfail('logical_or', ''),  # aten.logical_or_.default - couldn't find symbolic meta function/decomposition
     xfail('logical_xor', ''),  # aten.logical_xor_.default - couldn't find symbolic meta function/decomposition
-    xfail('logit', ''),  # aten.logit_.default - couldn't find symbolic meta function/decomposition
+    xfail('special.logit', ''),  # aten.logit_.default - couldn't find symbolic meta function/decomposition
     xfail('lt', ''),  # aten.lt_.Tensor - couldn't find symbolic meta function/decomposition
     xfail('mvlgamma', 'mvlgamma_p_1'),  # aten.mvlgamma_.default - couldn't find symbolic meta function/decomposition
     xfail('mvlgamma', 'mvlgamma_p_3'),  # aten.mvlgamma_.default - couldn't find symbolic meta function/decomposition
@@ -1450,7 +1450,7 @@ inplace_symbolic_tensor_failures = {
     xfail('sigmoid', ''),  # aten.sigmoid_.default - couldn't find symbolic meta function/decomposition
     xfail('sign', ''),  # aten.sign_.default - couldn't find symbolic meta function/decomposition
     xfail('sin', ''),  # aten.sin_.default - couldn't find symbolic meta function/decomposition
-    xfail('sinc', ''),  # aten.sinc_.default - couldn't find symbolic meta function/decomposition
+    xfail('special.sinc', ''),  # aten.sinc_.default - couldn't find symbolic meta function/decomposition
     xfail('sinh', ''),  # aten.sinh_.default - couldn't find symbolic meta function/decomposition
     xfail('sqrt', ''),  # aten.sqrt_.default - couldn't find symbolic meta function/decomposition
     xfail('square', ''),  # aten.pow_.Scalar - couldn't find symbolic meta function/decomposition

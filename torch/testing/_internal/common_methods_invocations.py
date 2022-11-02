@@ -9201,8 +9201,11 @@ op_db: List[OpInfo] = [
            reference_inputs_func=reference_inputs_diagonal_diag_embed,
            error_inputs_func=error_inputs_diagonal_diag_embed),
     OpInfo('diagonal',
-           # They are not strictly aliases as they have diverging defaults, but we can see them as aliases for testing purposes
-           # If we add tests that test the function against the alias, make linalg.diagonal into its own OpInfo
+           # TODO: They are not strictly aliases as they have diverging
+           # defaults, but we can see them as aliases for testing purposes. If
+           # we add tests that test the function against the alias, make
+           # linalg.diagonal into its own OpInfo
+           # https://github.com/pytorch/pytorch/issues/85419
            aliases=('linalg.diagonal',),
            aten_backward_name='diagonal_backward',
            dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16, torch.chalf),
@@ -10107,7 +10110,6 @@ op_db: List[OpInfo] = [
            check_batched_forward_grad=False),
     BinaryUfuncInfo(
         'max',
-        aliases=('maximum',),
         variant_test_name='binary',
         dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),
         supports_forward_ad=True,
@@ -10134,7 +10136,6 @@ op_db: List[OpInfo] = [
         )),
     BinaryUfuncInfo(
         'min',
-        aliases=('minimum',),
         variant_test_name='binary',
         dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),
         supports_forward_ad=True,
@@ -12049,7 +12050,7 @@ op_db: List[OpInfo] = [
     # standard entry, second is to run gradcheck tests on the second argument.
     BinaryUfuncInfo('igamma',
                     dtypes=floating_types_and(torch.bfloat16, torch.float16),
-                    aliases=('torch.special.gammainc',),
+                    aliases=('special.gammainc',),
                     dtypesIfCUDA=floating_types(),
                     # TODO: FIXME
                     supports_rhs_python_scalar=False,
@@ -12090,7 +12091,7 @@ op_db: List[OpInfo] = [
     #                 )),
     BinaryUfuncInfo('igammac',
                     dtypes=floating_types_and(torch.bfloat16, torch.float16),
-                    aliases=('torch.special.gammaincc',),
+                    aliases=('special.gammaincc',),
                     dtypesIfCUDA=floating_types(),
                     supports_autograd=False,
                     supports_rhs_python_scalar=False,
@@ -12605,9 +12606,10 @@ op_db: List[OpInfo] = [
                                     'TestSparseUnaryUfuncs', 'test_sparse_fn_grad'),
                    ),
                    decorators=(precisionOverride({torch.bfloat16: 1e-2}),)),
-    UnaryUfuncInfo('sinc',
+    UnaryUfuncInfo('special.sinc',
+                   aten_name="sinc",
                    ref=np_sinc_with_fp16_as_fp32,
-                   aliases=('special.sinc',),
+                   aliases=('sinc',),
                    dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16),
                    dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
                    handles_large_floats=False,
@@ -15234,11 +15236,12 @@ op_db: List[OpInfo] = [
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
         assert_autodiffed=True),
-    UnaryUfuncInfo('logit',
+    UnaryUfuncInfo('special.logit',
+                   aten_name='logit',
                    aten_backward_name='logit_backward',
                    ref=scipy.special.logit if TEST_SCIPY else None,
                    domain=(0, 1),
-                   aliases=('special.logit', ),
+                   aliases=('logit',),
                    supports_forward_ad=True,
                    supports_fwgrad_bwgrad=True,
                    decorators=(precisionOverride({torch.bfloat16: 5e-1,
@@ -16431,8 +16434,6 @@ python_ref_db = [
             # than the torch result was (nan)!
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref',
                          dtypes=(torch.chalf,), device_type='cpu', active_if=not (IS_MACOS or IS_WINDOWS)),
-            # Reference result was farther (0.0) from the precise computation
-            # than the torch result was (nan)!
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback',
                          dtypes=(torch.chalf,), device_type='cpu', active_if=not (IS_MACOS or IS_WINDOWS)),
         )
@@ -16603,7 +16604,6 @@ python_ref_db = [
     ),
     PythonRefInfo(
         "_refs.movedim",
-        aliases=('moveaxis',),
         torch_opinfo_name="movedim",
         supports_nvfuser=False,
         skips=(
@@ -16688,6 +16688,10 @@ python_ref_db = [
         torch_opinfo_name="fill",
         supports_out=True,
         supports_nvfuser=False,
+        skips=(
+            # Listed in get_ignored_functions(), which don't use __torch_function__
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_mock_mode_op_op'),
+        )
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.floor",
@@ -16751,19 +16755,19 @@ python_ref_db = [
         torch_opinfo_name="lgamma",
     ),
     ElementwiseUnaryPythonRefInfo(
-        "_refs.special.multigammaln",
+        "_refs.mvlgamma",
         torch_opinfo_name="mvlgamma",
         torch_opinfo_variant_name="mvlgamma_p_1",
         supports_nvfuser=False,
     ),
     ElementwiseUnaryPythonRefInfo(
-        "_refs.special.multigammaln",
+        "_refs.mvlgamma",
         torch_opinfo_name="mvlgamma",
         torch_opinfo_variant_name="mvlgamma_p_3",
         supports_nvfuser=False,
     ),
     ElementwiseUnaryPythonRefInfo(
-        "_refs.special.multigammaln",
+        "_refs.mvlgamma",
         torch_opinfo_name="mvlgamma",
         torch_opinfo_variant_name="mvlgamma_p_5",
         supports_nvfuser=False,
@@ -16783,6 +16787,11 @@ python_ref_db = [
     ElementwiseUnaryPythonRefInfo(
         "_refs.log2",
         torch_opinfo_name="log2",
+    ),
+    ElementwiseUnaryPythonRefInfo(
+        "_refs.special.logit",
+        torch_opinfo_name="special.logit",
+        supports_nvfuser=False,
     ),
     PythonRefInfo(
         "_refs.logsumexp",
@@ -16836,7 +16845,6 @@ python_ref_db = [
     ElementwiseUnaryPythonRefInfo(
         "_refs.sigmoid",
         torch_opinfo_name="sigmoid",
-        aliases=('_refs.special.expit',),
         # Reference: https://github.com/pytorch/pytorch/issues/56012
         handles_complex_extremal_values=False,
         handles_large_floats=False,
@@ -16862,8 +16870,8 @@ python_ref_db = [
         torch_opinfo_name="sin",
     ),
     ElementwiseUnaryPythonRefInfo(
-        "_refs.sinc",
-        torch_opinfo_name="sinc",
+        "_refs.special.sinc",
+        torch_opinfo_name="special.sinc",
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.sinh",
@@ -16901,26 +16909,9 @@ python_ref_db = [
         # https://github.com/pytorch/pytorch/issues/85258
         supports_nvfuser=False,
     ),
-    PythonRefInfo(
-        "_refs.special.log_softmax",
-        torch_opinfo_name="log_softmax",  # alias
-        torch_opinfo_variant_name="with_dtype",
-        supports_out=False,
-    ),
-    PythonRefInfo(
-        "_refs.special.softmax",
-        torch_opinfo_name="softmax",  # alias
-        torch_opinfo_variant_name="with_dtype",
-        supports_out=False,
-    ),
     #
     # Elementwise Unary Special OpInfos
     #
-    ElementwiseUnaryPythonRefInfo(
-        "_refs.special.logit",
-        torch_opinfo_name="logit",
-        supports_nvfuser=False,
-    ),
     #
     # Elementwise Unary nn.functional OpInfos
     #
@@ -17003,18 +16994,12 @@ python_ref_db = [
         supports_out=True,
         supports_nvfuser=False,
         skips=(
-            # RunTimeError: no _refs support for torch.Tensor.index_select
+            # RuntimeError: no _refs support for torch.Tensor.index_select
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref'),
         )),
     PythonRefInfo(
         "_refs.nn.functional.leaky_relu",
         torch_opinfo_name="nn.functional.leaky_relu",
-    ),
-    PythonRefInfo(
-        "_refs.nn.functional.log_softmax",
-        torch_opinfo_name="log_softmax",  # alias
-        torch_opinfo_variant_name="with_dtype",
-        supports_out=False,
     ),
     PythonRefInfo(
         "_refs.nn.functional.poisson_nll_loss",
@@ -17048,12 +17033,6 @@ python_ref_db = [
         torch_opinfo_name="nn.functional.selu",
     ),
     PythonRefInfo(
-        "_refs.nn.functional.softmax",
-        torch_opinfo_name="softmax",  # alias
-        torch_opinfo_variant_name="with_dtype",
-        supports_out=False,
-    ),
-    PythonRefInfo(
         "_refs.nn.functional.softmin",
         torch_opinfo_name="nn.functional.softmin",
         torch_opinfo_variant_name="with_dtype",
@@ -17074,6 +17053,10 @@ python_ref_db = [
         "_refs.nn.functional.margin_ranking_loss",
         torch_opinfo_name="nn.functional.margin_ranking_loss",
         supports_nvfuser=False,
+        skips=(
+            # TODO: TypeError: margin_ranking_loss() got an unexpected keyword argument 'size_average'
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_mock_mode_op_op'),
+        )
     ),
     PythonRefInfo(
         "_refs.nn.functional.mse_loss",
@@ -17084,6 +17067,10 @@ python_ref_db = [
         "_refs.nn.functional.hinge_embedding_loss",
         torch_opinfo_name="nn.functional.hinge_embedding_loss",
         supports_nvfuser=False,
+        skips=(
+            # TODO: TypeError: hinge_embedding_loss() got an unexpected keyword argument 'size_average'
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_mock_mode_op_op'),
+        )
     ),
     PythonRefInfo(
         "_refs.nn.functional.nll_loss",
@@ -17196,8 +17183,6 @@ python_ref_db = [
                 unittest.expectedFailure, 'TestCommon', 'test_python_ref',
                 dtypes=(torch.complex32,), device_type="cuda"
             ),
-            # Reference result was farther (0.7433461727239705) from the precise
-            # computation than the torch result was (nan)!
             DecorateInfo(
                 unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback',
                 dtypes=(torch.complex32,), device_type="cuda"
@@ -17269,6 +17254,8 @@ python_ref_db = [
         rhs_make_tensor_kwargs={'exclude_zero': True},
         supports_rhs_python_scalar=True,
         skips=(
+            # Reference result was farther (nan) from the precise computation
+            # than the torch result was (nan)!
             DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_python_ref',
                          dtypes=(torch.bfloat16,), device_type='cpu'),
             DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_python_ref_torch_fallback',
@@ -17377,15 +17364,10 @@ python_ref_db = [
                 unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor',
                 dtypes=(torch.complex32,),
             ),
-
-            # Reference result was farther (0.0) from the precise computation
-            # than the torch result was (nan)!
             DecorateInfo(
                 unittest.expectedFailure, 'TestCommon', 'test_python_ref',
                 dtypes=(torch.complex32,), device_type='cuda'
             ),
-            # Reference result was farther (0.0) from the precise computation
-            # than the torch result was (nan)!
             DecorateInfo(
                 unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback',
                 dtypes=(torch.complex32,), device_type='cuda'
@@ -17412,14 +17394,10 @@ python_ref_db = [
                 unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor',
                 dtypes=(torch.complex32,),
             ),
-            # Reference result was farther (inf) from the precise
-            # computation than the torch result was (nan)!
             DecorateInfo(
                 unittest.expectedFailure, 'TestCommon', 'test_python_ref',
                 dtypes=(torch.complex32,), device_type="cuda"
             ),
-            # Reference result was farther (inf) from the precise
-            # computation than the torch result was (nan)!
             DecorateInfo(
                 unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback',
                 dtypes=(torch.complex32,), device_type="cuda"
@@ -17445,8 +17423,6 @@ python_ref_db = [
             # the torch result was (nan)!
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref',
                          dtypes=(torch.chalf,), device_type='cpu'),
-            # Reference result was farther (nan) from the precise computation than
-            # the torch result was (nan)!
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback',
                          dtypes=(torch.chalf,), device_type='cpu'),
         ),
@@ -17471,14 +17447,10 @@ python_ref_db = [
                 unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor',
                 dtypes=(torch.complex32,),
             ),
-            # Reference result was farther (0.7433461727239705) from the precise
-            # computation than the torch result was (nan)!
             DecorateInfo(
                 unittest.expectedFailure, 'TestCommon', 'test_python_ref',
                 dtypes=(torch.complex32,), device_type="cuda"
             ),
-            # Reference result was farther (0.7433461727239705) from the precise
-            # computation than the torch result was (nan)!
             DecorateInfo(
                 unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback',
                 dtypes=(torch.complex32,), device_type="cuda"
@@ -17728,6 +17700,10 @@ python_ref_db = [
         "_refs.broadcast_shapes",
         torch_opinfo_name="broadcast_shapes",
         supports_nvfuser=False,
+        skips=(
+            # Listed in get_ignored_functions(), which don't use __torch_function__
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_mock_mode_op_op'),
+        )
     ),
     PythonRefInfo(
         "_refs.broadcast_tensors",
@@ -18112,6 +18088,8 @@ python_ref_db = [
             # There's a discrepancy in returned shape between CPU and other devices
             # AssertionError: Shapes torch.Size([0]) and torch.Size([2]) are not equal!
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_meta', device_type="cpu"),
+            # RuntimeError: no _refs support for torch.native_batch_norm
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_mock_mode_op_op'),
         ),
         skips=(
             # https://github.com/pytorch/pytorch/issues/85960
@@ -18343,7 +18321,7 @@ python_ref_db = [
         # empty_strided
         supports_nvfuser=False,
         skips=(
-            # no _refs support for Tensor.__setitem__
+            # RuntimeError: no _refs support for Tensor.__setitem__
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref'),
             # Sample out= with a stride of zero. This _out operation checks that the input has no
             # inner overlap
@@ -18355,8 +18333,9 @@ python_ref_db = [
         # empty_strided
         supports_nvfuser=False,
         skips=(
-            # no _refs support for Tensor.__setitem__
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref'),)
+            # RuntimeError: no _refs support for Tensor.__setitem__
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref'),
+        )
     ),
     PythonRefInfo(
         "_refs.index_add",
@@ -18364,8 +18343,9 @@ python_ref_db = [
         # empty_strided
         supports_nvfuser=False,
         skips=(
-            # no _refs support for Tensor.__setitem__
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref'),)
+            # RuntimeError: no _refs support for Tensor.__setitem__
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref'),
+        )
     ),
     PythonRefInfo(
         "_refs.index_fill",
@@ -18373,8 +18353,9 @@ python_ref_db = [
         # empty_strided
         supports_nvfuser=False,
         skips=(
-            # no _refs support for Tensor.__setitem__
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref'),)
+            # RuntimeError: no _refs support for Tensor.__setitem__
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref'),
+        )
     ),
     #
     # Test-related functions
