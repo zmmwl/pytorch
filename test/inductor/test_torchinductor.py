@@ -4002,6 +4002,20 @@ class CommonTemplate:
         ]
         self.common(forward, args)
 
+    def test_any_all_reductions(self):
+        dtypes = [torch.bool, torch.int32, torch.float32]
+        devices = ["cpu", "cuda"] if torch.cuda.is_available() else ["cpu"]
+        for device in devices:
+            for kd in [True, False]:
+                for dt in dtypes:
+                    inps0 = (torch.zeros(2, 0, device="cuda", dtype=dt), 1)
+                    pass_ops = [lambda *x: aten.any(*x), lambda *x: aten.all(*x)]
+                    for po in pass_ops:
+                        compiled = torch._dynamo.optimize("inductor")(po)
+                        expected = po(*inps0)
+                        actual = compiled(*inps0)
+                        self.assertEqual(expected, actual)
+
     def test_zero_dim_reductions(self):
         devices = ["cpu", "cuda"] if torch.cuda.is_available() else ["cpu"]
         for device in devices:
