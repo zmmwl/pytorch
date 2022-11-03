@@ -8,6 +8,7 @@
 #include <torch/csrc/utils/python_strings.h>
 #include <torch/csrc/utils/python_torch_function_mode.h>
 #include <torch/csrc/utils/torch_dispatch_mode.h>
+#include <torch/csrc/utils/torch_pre_dispatch_mode.h>
 
 #include <ATen/ATen.h>
 #include <ATen/PythonTorchFunctionTLS.h>
@@ -277,6 +278,7 @@ auto handle_torch_function_no_python_arg_parser(
     default:
       TORCH_INTERNAL_ASSERT(0, static_cast<int>(torch_function_name));
   }
+
   // overloaded_args already all have unique types
   // nb: modes don't go in the overloaded types list, as they are not
   // necessarily types
@@ -309,6 +311,7 @@ auto handle_torch_function_no_python_arg_parser(
       td_g.emplace();
       mode_obj = td_g->get_cur_mode()->ptr(getPyInterpreter());
     }
+
     py::object torch_function =
         PyObject_FastGetAttrString(mode_obj, torch_function_name_str);
     if (!torch_function) {

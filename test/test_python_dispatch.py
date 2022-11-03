@@ -11,7 +11,9 @@ from torch.utils._mode_utils import no_dispatch, all_same_mode
 from torch.testing._internal.logging_tensor import LoggingTensor, LoggingTensorReentrant, LoggingTensorMode, \
     log_input, capture_logs, capture_logs_with_logging_tensor_mode
 from torch.utils._pytree import tree_map, tree_map_only
-from torch.utils._python_dispatch import TorchDispatchMode, _get_current_dispatch_mode, _get_current_dispatch_mode_stack
+from torch.utils._python_dispatch import TorchDispatchMode, _get_current_dispatch_mode, \
+    _get_current_dispatch_mode_stack, TorchPreDispatchMode, _get_current_pre_dispatch_mode, \
+    _get_current_pre_dispatch_mode_stack
 
 import logging
 
@@ -1667,6 +1669,103 @@ $0 = torch._ops.aten.empty.memory_format([], device=device(type='cpu'), pin_memo
 
             e = LayoutDefaultReturn(torch.randn(4, 2), use_wrapper_subclass)
             self.assertEqual(e.layout, torch.strided)
+
+class TestPreDispatchModes(TestCase):
+    def test_basic(self):
+        class Foo(TorchPreDispatchMode):
+            def __torch_pre_dispatch__(self, func, args=(), kwargs=None):
+                kwargs = kwargs if kwargs else {}
+                out.append("layer1")
+                return func(*args, **kwargs)
+
+        out = []
+        x = torch.randn(3)
+        with Foo():
+            x.sin()
+
+        self.assertEqual(out, ["layer1"])
+
+    def test_nested(self):
+        class Foo(TorchPreDispatchMode):
+            def __torch_pre_dispatch__(self, func, args=(), kwargs=None):
+                kwargs = kwargs if kwargs else {}
+                out.append("layer1")
+                return func(*args, **kwargs)
+
+        out = []
+        x = torch.randn(3)
+        with Foo():
+            x.sin()
+
+        self.assertEqual(out, ["layer1"])
+
+    def test_pre_dispatch_mode_respects_no_dispatch(self) -> None:
+        with capture_logs(is_mode=True) as logs1:
+            with LoggingTensorMode():
+                torch.ones([2, 3])
+                with no_dispatch():
+                    torch.ones([2, 3])
+        with capture_logs(is_mode=True) as logs2:
+            with LoggingTensorMode():
+                torch.ones([2, 3])
+        self.assertEqual(logs1, logs2)
+
+
+    def test_error_using_class_method_on_mode(self):
+        class A(TorchPreDispatchMode):
+            @classmethod
+            def __torch_pre_dispatch__(cls, func, args=(), kwargs=None):
+                return func(args, kwargs)
+
+        x = torch.tensor(5.)
+        with self.assertRaisesRegex(RuntimeError, "classmethod is not supported, please make it a plain method"):
+            with A():
+                x + x
+
+    def test_get_cur_mode(self):
+        class A(TorchPreDispatchMode):
+            def __torch_pre_dispatch__(self, func, args=(), kwargs=None):
+                pass
+
+        self.assertEqual(_get_current_pre_dispatch_mode(), None)
+
+        with A() as mode1:
+            self.assertEqual(_get_current_pre_dispatch_mode(), mode1)
+
+        with mode1:
+            with A() as mode2:
+                self.assertEqual(_get_current_pre_dispatch_mode(), mode2)
+
+    def test_get_mode_stack(self):
+        class A(TorchPreDispatchMode):
+            def __torch_pre_dispatch__(self, func, args=(), kwargs=None):
+                pass
+
+        self.assertEqual(_get_current_pre_dispatch_mode_stack(), [])
+
+        with A() as mode1:
+            self.assertEqual(_get_current_pre_dispatch_mode_stack(), [mode1])
+
+        with mode1:
+            with A() as mode2:
+                self.assertEqual(_get_current_pre_dispatch_mode_stack(), [mode1, mode2])
+
+    def test_respects_disble_python_dispatcher(self):
+        class A(TorchPreDispatchMode):
+            def __torch_pre_dispatch__(self, func, args=(), kwargs=None):
+                raise RuntimeError("")
+
+        x = torch.randn(2)
+        with self.assertRaises(RuntimeError):
+            with A():
+                x + x
+
+
+        with A():
+            r = torch._C._DisablePythonDispatcher()
+            x + x
+        del r
+
 
 class TestPythonDispatcher(TestCase):
     def test_basic(self):

@@ -124,8 +124,14 @@ class PyOperator(PyOperatorABC):
 
     def py_impl(self, dispatch_key_or_mode):
         def inner(fn):
-            if inspect.isclass(dispatch_key_or_mode) and issubclass(
-                dispatch_key_or_mode, torch.utils._python_dispatch.TorchDispatchMode
+            if inspect.isclass(dispatch_key_or_mode) and (
+                issubclass(
+                    dispatch_key_or_mode, torch.utils._python_dispatch.TorchDispatchMode
+                )
+                or issubclass(
+                    dispatch_key_or_mode,
+                    torch.utils._python_dispatch.TorchPreDispatchMode,
+                )
             ):
                 mode = dispatch_key_or_mode
                 assert mode not in self.python_key_mode_table
@@ -145,11 +151,11 @@ class PyOperator(PyOperatorABC):
         return inner
 
     def dispatch(self, dispatch_key, *args, **kwargs):
-        from torch.utils._python_dispatch import _get_current_dispatch_mode
+        from torch.utils._python_dispatch import _get_current_dispatch_mode, _get_current_pre_dispatch_mode
 
-        if dispatch_key == torch._C.DispatchKey.Python:
+        if dispatch_key == torch._C.DispatchKey.Python or dispatch_key == torch._C.DispatchKey.PythonDispatcher:
             # TODO(voz): We should walk all the nodes here / turn it into a list, topmode is ok for now.
-            curr_mode = type(_get_current_dispatch_mode())
+            curr_mode = type(_get_current_dispatch_mode()) if dispatch_key == torch._C.DispatchKey.Python else type(_get_current_pre_dispatch_mode())
             assert (
                 curr_mode is not None
             ), "Illegal invocation of dispatch on torch._C.DispatchKey.Python without a mode."
@@ -314,6 +320,19 @@ class OpOverload(PyOperatorABC):
             key = torch._C._dispatch_key_parse(attr)
         except Exception as e:
             raise AttributeError()
+
+        if key == torch._C.DispatchKey.PythonDispatcher:
+            from torch.utils._python_dispatch import _pop_pre_mode_temporarily
+
+            def handler(*args, **kwargs):
+                with _pop_pre_mode_temporarily() as mode:
+                    if mode.__torch_pre_dispatch__.__self__ is type(mode):
+                        raise RuntimeError("Defining your mode's `__torch_pre_dispatch__` as a classmethod is not "
+                                           "supported, please make it a plain method")
+                    return mode.__torch_pre_dispatch__(self, args, kwargs)
+
+            setattr(self, attr, handler)
+            return handler
 
         if key == torch._C.DispatchKey.Python:
             if not self.python_key_mode_table:
