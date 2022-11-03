@@ -1639,24 +1639,21 @@ import torch._refs
 import torch._refs.nn.functional
 import torch._refs.special
 
+all_meta_table = {}
+
 
 def activate_meta():
-
-    activate_meta_table = {}
-
     # For a given op, we pick the most specific decomp function from
     # global_decomp_table in the precedence order of meta > post_autograd > pre_autograd
     for type in ["meta", "post_autograd", "pre_autograd"]:
         registry = global_decomposition_table[type]
 
         for opo in registry:
-            if opo not in activate_meta_table:
-                activate_meta_table[opo] = registry[opo]
+            if opo not in all_meta_table:
+                all_meta_table[opo] = registry[opo]
 
-    for op_overload, fn in activate_meta_table.items():
+    for op_overload, fn in all_meta_table.items():
         assert isinstance(op_overload, OpOverload)
-
-        op_overload.py_impl(torch._C.DispatchKey.Meta)(fn)
 
         if torch._C._dispatch_has_kernel_for_dispatch_key(
             op_overload.name(), "CompositeImplicitAutograd"
@@ -1685,7 +1682,11 @@ def activate_meta():
         }:
             pass
         else:
+            # register python meta kernel to C++ dispatcher
             _meta_lib_dont_use_me_use_register_meta.impl(op_overload, fn)
+
+            # register python meta kernel to python dispatcher
+            op_overload.py_impl(torch._C.DispatchKey.Meta)(fn)
 
 
 activate_meta()
