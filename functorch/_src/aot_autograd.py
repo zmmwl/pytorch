@@ -16,6 +16,7 @@ from torch._subclasses import FakeTensorMode, CrossRefFakeMode
 from torch.fx import immutable_collections, Interpreter
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.nn.utils import stateless
+from torch._dispatch.python import patch_py_impls
 
 from functorch import make_fx
 from torch._dispatch.python import enable_python_dispatcher
@@ -131,6 +132,27 @@ def setup_stacktrace_preservation_hooks(roots: List):
         )
         node.register_hook(get_posthook(special_stack))
 
+@contextmanager
+def enable_functionalization(*args, **kwargs):
+    torch._enable_functionalization(*args, **kwargs)
+    try:
+        yield
+    finally:
+        torch._disable_functionalization()
+
+
+def reshape_to_reshape_copy(self, shape):
+    if torch._is_functional_tensor(self):
+        torch._freeze_functional_tensor(self)
+        r = torch.ops.aten._reshape_copy.default(self, shape)
+        torch._freeze_functional_tensor(r)
+        return r
+    else:
+        # TODO: Not really sure why I hit this
+        return torch.ops.aten.reshape.default._op_dk(
+            torch._C.DispatchKey.CompositeImplicitAutograd, self, shape
+        )
+
 
 # This is a version of functionalization that is specifically designed
 # for the AOTAutograd use case.  It might be generally applicable though
@@ -167,7 +189,7 @@ def setup_stacktrace_preservation_hooks(roots: List):
 #
 # TODO: Provide a faster version of this that assumes flat arguments
 # (so no pytree necessary)
-def detach_and_functionalize_pure(f, preserve_requires_grad=True):
+def detach_and_functionalize_pure(f, *, preserve_requires_grad=True, preserve_reshape=True):
     @wraps(f)
     def inner(*args, **kwargs):
         def to_fun(t):
@@ -184,11 +206,17 @@ def detach_and_functionalize_pure(f, preserve_requires_grad=True):
 
         f_args, f_kwargs = pytree.tree_map(to_fun, (args, kwargs))
 
-        torch._enable_functionalization(reapply_views=True)
-        try:
+        patcher = nullcontext
+        if preserve_reshape:
+            DispatchKey = torch._C.DispatchKey
+            patcher = patch_py_impls({
+                torch.ops.aten.reshape.default: {
+                    DispatchKey.CompositeImplicitAutograd: reshape_to_reshape_copy,
+                },
+            })
+
+        with enable_functionalization(reapply_views=True), patcher, enable_python_dispatcher():
             outs = f(*f_args, **f_kwargs)
-        finally:
-            torch._disable_functionalization()
 
         # Detect input mutation and error if found
         flat_args, _ = pytree.tree_flatten((args, kwargs))
