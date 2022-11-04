@@ -5,8 +5,8 @@ from torch.ao.quantization.backend_config import (
     ObservationType,
 )
 from torch.ao.quantization.utils import (
-    activation_dtype,
-    get_combined_dict,
+    _activation_dtype,
+    _get_combined_dict,
     Pattern,
     NodePattern,
     QuantizerCls,
@@ -60,7 +60,7 @@ def get_quantize_handler_cls(
             used for the pattern matched to this handler. Some handlers override
             this to a different value than what is specified in the qconfig.
             """
-            act_dtype = activation_dtype(qconfig)
+            act_dtype = _activation_dtype(qconfig)
             # TODO: change to is_qat
             if is_training:
                 if act_dtype == torch.quint8 and self.overwrite_output_fake_quantizer is not None:
@@ -124,7 +124,7 @@ def get_native_quant_patterns(additional_quant_patterns: Dict[Pattern, Quantizer
     """
     patterns = get_default_quant_patterns()
     if additional_quant_patterns is not None:
-        patterns = get_combined_dict(patterns, additional_quant_patterns)
+        patterns = _get_combined_dict(patterns, additional_quant_patterns)
     # TODO: currently we just extend the quantize handlers generated from
     # `get_native_backend_config`
     # in the future we can just assign backend_config when everything is defined

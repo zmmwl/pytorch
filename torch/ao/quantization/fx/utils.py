@@ -14,10 +14,10 @@ from torch.ao.quantization.fake_quantize import FakeQuantizeBase
 from torch.ao.quantization.observer import ObserverBase
 from torch.ao.quantization.stubs import DeQuantStub
 from torch.ao.quantization.utils import (
-    activation_is_statically_quantized,
-    is_per_tensor,
-    is_per_channel,
-    to_underlying_dtype,
+    _activation_is_statically_quantized,
+    _is_per_tensor,
+    _is_per_channel,
+    _to_underlying_dtype,
 )
 from torch.ao.quantization.observer import _is_activation_post_process
 
@@ -155,7 +155,7 @@ def graph_pretty_str(g, shorten=True) -> str:
     return res_str
 
 def get_per_tensor_qparams(activation_post_process):
-    assert is_per_tensor(activation_post_process.qscheme), 'Only per tensor quantization is supported'
+    assert _is_per_tensor(activation_post_process.qscheme), 'Only per tensor quantization is supported'
     scale, zero_point = activation_post_process.calculate_qparams()
     scale = float(scale)
     zero_point = int(zero_point)
@@ -187,7 +187,7 @@ def get_quantize_node_info(
             not hasattr(activation_post_process, 'compute_dtype'):
         node_type = "call_function"
         scale, zero_point = activation_post_process.calculate_qparams()  # type: ignore[attr-defined]
-        if is_per_channel(activation_post_process.qscheme):  # type: ignore[attr-defined]
+        if _is_per_channel(activation_post_process.qscheme):  # type: ignore[attr-defined]
             ch_axis = int(activation_post_process.ch_axis)  # type: ignore[attr-defined]
             qparams = {"_scale_": scale, "_zero_point_": zero_point, "_axis_": ch_axis, "_dtype_": dtype}
             if is_decomposed:
@@ -200,7 +200,7 @@ def get_quantize_node_info(
             if is_decomposed:
                 quant_min = activation_post_process.quant_min  # type: ignore[attr-defined]
                 quant_max = activation_post_process.quant_max  # type: ignore[attr-defined]
-                dtype = to_underlying_dtype(dtype)
+                dtype = _to_underlying_dtype(dtype)
                 qparams = {
                     "_scale_": scale,
                     "_zero_point_": zero_point,
@@ -643,7 +643,7 @@ def _is_custom_module_lstm(
     if qconfig is not None and qhandler is not None:
         assert isinstance(qhandler, torch.ao.quantization.fx.quantization_patterns.QuantizeHandler)  # type: ignore[attr-defined]
         return isinstance(mod, torch.nn.LSTM) and \
-            activation_is_statically_quantized(qconfig) and \
+            _activation_is_statically_quantized(qconfig) and \
             qhandler.is_custom_module()
     else:
         return isinstance(mod, torch.ao.nn.quantizable.LSTM)

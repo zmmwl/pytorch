@@ -10,6 +10,7 @@ from .qconfig_mapping import *  # noqa: F403
 from .quant_type import *  # noqa: F403
 from .quantization_mappings import *  # type: ignore[no-redef]
 from .quantize import *  # noqa: F403
+from .quantize import _get_observer_dict
 from .quantize_jit import *  # noqa: F403
 from .stubs import *  # noqa: F403
 
@@ -86,7 +87,6 @@ __all__ = [
     "fuse_modules_qat",
     "fused_per_channel_wt_fake_quant_range_neg_127_to_127",
     "fused_wt_fake_quant_range_neg_127_to_127",
-    "get_combined_dict",
     "get_default_compare_output_module_list",
     "get_default_custom_config_dict",
     "get_default_dynamic_quant_module_mappings",
