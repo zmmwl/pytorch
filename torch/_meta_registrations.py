@@ -1666,8 +1666,7 @@ def scatter_meta_impl(self, dim, index, src=None, reduce_=None, use_new_options=
 
 @register_meta(aten.scatter_add.default)
 def meta_scatter_add(self, dim, index, src):
-    scatter_meta_impl(self, dim, index, src, "add")
-    return self.new_empty(self.shape)
+    return scatter_meta_impl(self, dim, index, src, "add")
 
 
 @register_meta(aten.scatter_add_)
@@ -1676,14 +1675,16 @@ def meta_scatter_add_(self, dim, index, src):
     return self
 
 
+# NB: this hits scatter.value, scatter.src, scatter.value_reduce, scatter.reduce
+# scatter.value_out, scatter.src_out, scatter.value_reduce_out, scatter.reduce_out
 @register_meta(aten.scatter)
 @out_wrapper()
 def meta_scatter(self, dim, index, src_or_value, reduce=None):
     src = src_or_value if isinstance(src_or_value, torch.Tensor) else None
-    scatter_meta_impl(self, dim, index, src, reduce)
-    return self.new_empty(self.shape)
+    return scatter_meta_impl(self, dim, index, src, reduce)
 
 
+# NB: this hits scatter_.value, scatter_.src, scatter_.value_reduce, scatter_.reduce
 @register_meta(aten.scatter_)
 def meta_scatter_(self, dim, index, src_or_value, reduce=None):
     src = src_or_value if isinstance(src_or_value, torch.Tensor) else None
@@ -1694,8 +1695,7 @@ def meta_scatter_(self, dim, index, src_or_value, reduce=None):
 @register_meta([aten.scatter_reduce.two, aten.scatter_reduce.two_out])
 @out_wrapper()
 def meta_scatter_reduce_two(self, dim, index, src, reduce, include_self=True):
-    scatter_meta_impl(self, dim, index, src, reduce, use_new_options=True)
-    return self.new_empty(self.shape)
+    return scatter_meta_impl(self, dim, index, src, reduce, use_new_options=True)
 
 
 @register_meta(aten.scatter_reduce_.two)
