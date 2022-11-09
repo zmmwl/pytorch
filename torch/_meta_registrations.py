@@ -1644,6 +1644,11 @@ def upsample_nearest2d_vec(input, output_size, scale_factors):
     )
 
 
+@register_meta([aten.sort.default, aten.sort.stable])
+def meta_sort(self, stable=None, dim=-1, descending=False):
+    return torch.empty_like(self), torch.empty_like(self, dtype=torch.int64)
+
+
 # We must also trigger meta registrations from PrimTorch ref
 # decompositions
 import torch._refs
