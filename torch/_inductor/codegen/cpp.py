@@ -335,9 +335,12 @@ class CppOverrides(OpOverrides):
     """Map element-wise ops to C++"""
 
     @staticmethod
-    def to_dtype(x, dtype):
+    def to_dtype(x, dtype, bitcast=False):
         assert dtype in DTYPE_TO_CPP, f"{dtype} missing from {__name__}.DTYPE_TO_CPP"
-        return f"static_cast<{DTYPE_TO_CPP[dtype]}>({x})"
+        if bitcast:
+            return f"*(reinterpret_cast<{DTYPE_TO_CPP[dtype]}*>(&{x}))"
+        else:
+            return f"static_cast<{DTYPE_TO_CPP[dtype]}>({x})"
 
     @staticmethod
     def abs(x):

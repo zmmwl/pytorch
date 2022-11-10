@@ -962,6 +962,28 @@ class CommonTemplate:
             ),
         )
 
+    def test_view_dtype(self):
+        # FIXME: Only support view as another dtype with the same size for now
+        # FIXME: float16/int16 conversion for the triton backend does not work
+        #        because float16 is promoted to float32.
+        def fn(i8_tensor, f32_tensor, f64_tensor):
+            return (
+                i8_tensor.view(torch.bool),
+                i8_tensor.view(torch.uint8),
+                f32_tensor.view(torch.int32),
+                f64_tensor.view(torch.int64),
+            )
+
+        self.common(
+            fn,
+            (
+                torch.randint(-128, 127, (3, 4), dtype=torch.int8),
+                torch.randn(3, 4, dtype=torch.float32),
+                torch.randn(3, 4, dtype=torch.float64),
+            ),
+            check_lowp=False,
+        )
+
     def test_relu(self):
         def fn(a, b):
             return (torch.relu(a), torch.relu(a + b) / 10)
