@@ -495,14 +495,14 @@ def _legacy_save(obj, f, pickle_module, pickle_protocol) -> None:
             # If storage is allocated, ensure that any other saved storages
             # pointing to the same data all have the same dtype. If storage is
             # not allocated, don't perform this check
-            if storage.data_ptr() != 0:
-                if storage.data_ptr() in storage_dtypes:
-                    if storage_dtype != storage_dtypes[storage.data_ptr()]:
+            if storage._data_ptr_readonly() != 0:
+                if storage._data_ptr_readonly() in storage_dtypes:
+                    if storage_dtype != storage_dtypes[storage._data_ptr_readonly()]:
                         raise RuntimeError(
                             'Cannot save multiple tensors or storages that '
                             'view the same data as different types')
                 else:
-                    storage_dtypes[storage.data_ptr()] = storage_dtype
+                    storage_dtypes[storage._data_ptr_readonly()] = storage_dtype
 
             view_metadata: Optional[Tuple[str, int, int]]
 
@@ -619,14 +619,14 @@ def _save(obj, zip_file, pickle_module, pickle_protocol):
             # If storage is allocated, ensure that any other saved storages
             # pointing to the same data all have the same dtype. If storage is
             # not allocated, don't perform this check
-            if storage.data_ptr() != 0:
-                if storage.data_ptr() in storage_dtypes:
-                    if storage_dtype != storage_dtypes[storage.data_ptr()]:
+            if storage._data_ptr_readonly() != 0:
+                if storage._data_ptr_readonly() in storage_dtypes:
+                    if storage_dtype != storage_dtypes[storage._data_ptr_readonly()]:
                         raise RuntimeError(
                             'Cannot save multiple tensors or storages that '
                             'view the same data as different types')
                 else:
-                    storage_dtypes[storage.data_ptr()] = storage_dtype
+                    storage_dtypes[storage._data_ptr_readonly()] = storage_dtype
 
             storage_key = id_map.setdefault(storage._cdata, str(len(id_map)))
             location = location_tag(storage)
@@ -659,7 +659,7 @@ def _save(obj, zip_file, pickle_module, pickle_protocol):
             storage = storage.cpu()
         # Now that it is on the CPU we can directly copy it into the zip file
         num_bytes = storage.nbytes()
-        zip_file.write_record(name, storage.data_ptr(), num_bytes)
+        zip_file.write_record(name, storage._data_ptr_readonly(), num_bytes)
 
 
 def load(

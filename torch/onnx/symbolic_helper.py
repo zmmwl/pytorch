@@ -1327,8 +1327,10 @@ def _index_fill_reshape_helper(g: jit_utils.GraphContext, self, dim, index):
 # the zero value is honored, similar to NumPy.
 # allowzero=1 is only supported for opset version >= 14.
 @_beartype.beartype
-def _reshape_helper(g: jit_utils.GraphContext, input, shape, allowzero=0):
+def _reshape_helper(g: jit_utils.GraphContext, input, shape, allowzero=0, copy=False):
     shape = _maybe_get_const(shape, "is")
+    copy = _maybe_get_const(copy, "b")
+    assert not copy, repr(copy)
     if not _is_value(shape):
         shape = g.op("Constant", value_t=torch.LongTensor(shape))
     if g.opset <= 13:

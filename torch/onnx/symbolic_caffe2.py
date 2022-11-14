@@ -290,9 +290,9 @@ def avg_pool2d(
     return output
 
 
-def reshape(g: jit_utils.GraphContext, input, shape):
+def reshape(g: jit_utils.GraphContext, input, shape, copy=False):
     if input not in symbolic_helper._quantized_ops:
-        return opset9.reshape(g, input, shape)
+        return opset9.reshape(g, input, shape, copy)
 
     kwargs = {
         "Y_scale_f": symbolic_helper._node_get(input.node(), "Y_scale"),

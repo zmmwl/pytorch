@@ -46,6 +46,8 @@
 #include <ATen/ops/_mkldnn_reshape.h>
 #include <ATen/ops/_mkldnn_transpose.h>
 #include <ATen/ops/_neg_view_copy_native.h>
+#include <ATen/ops/_reshape_copy.h>
+#include <ATen/ops/_reshape_alias.h>
 #include <ATen/ops/_reshape_alias_copy_native.h>
 #include <ATen/ops/_reshape_alias_native.h>
 #include <ATen/ops/_reshape_from_tensor_native.h>
@@ -1544,19 +1546,33 @@ Tensor alias_with_sizes_and_strides(
   return self_;
 }
 
-Tensor reshape_symint(const Tensor& self, c10::SymIntArrayRef proposed_shape) {
+c10::IntArrayRef maybeAsIntArrayRefSlow(c10::SymIntArrayRef a) {
+  return c10::asIntArrayRefSlow(a);
+}
+
+c10::IntArrayRef maybeAsIntArrayRefSlow(c10::IntArrayRef a) {
+  return a;
+}
+
+template <typename T>
+Tensor _reshape(const Tensor& self, c10::ArrayRef<T> proposed_shape, bool copy) {
   if (self.is_sparse()) {
     AT_ERROR("reshape is not implemented for sparse tensors");
   }
-  c10::SymDimVector shape = infer_size_dv(proposed_shape, self.sym_numel());
+
+  if (copy) {
+    return at::symint::_reshape_copy<T>(self, proposed_shape);
+  }
+
+  auto shape = infer_size_dv(proposed_shape, at::symint::numel<T>(self));
 
   if (self.is_mkldnn()) {
-    return at::_mkldnn_reshape(self, c10::asIntArrayRefSlow(shape));
+    return at::_mkldnn_reshape(self, maybeAsIntArrayRefSlow(shape));
   }
 
   // `computeStride` returns the proper strides to use if this
   // `reshape` can be just a view.
-  auto stride = at::detail::computeStride(self.sym_sizes(), self.sym_strides(), shape);
+  auto stride = at::detail::computeStride(at::symint::sizes<T>(self), at::symint::strides<T>(self), shape);
 
   // NB: Even though we have viewable geometry and the target strides here,
   //     we do not just call `as_strided` on `self` because the backward
@@ -1574,71 +1590,58 @@ Tensor reshape_symint(const Tensor& self, c10::SymIntArrayRef proposed_shape) {
     //
     // We need to do the checks here instead of in `native_functions.yaml`
     // to preserve backwards compatibility.
+    Tensor r;
     if (!self.is_xla() && !self.is_lazy() && !self.is_ipu() && !at::isTensorSubclassLike(self)) {
-      return self._reshape_alias_symint(shape, stride.value());
+      r = at::symint::_reshape_alias<T>(self, shape, stride.value());
     } else {
-      return self.view_symint(shape);
+      r = at::symint::view<T>(self, shape);
     }
+    // NB: this mutates the original storage too!  Method takes out a lock.
+    // To bypass the warning, call _unsafe_reshape
+    if (r.has_storage()) {
+      r.storage().unsafeGetStorageImpl()->set_warn_on_write(true);
+    }
+    return r;
   }
-  return at::_unsafe_view_symint(self.clone(at::MemoryFormat::Contiguous), shape);
+  return at::symint::_unsafe_view<T>(self.clone(at::MemoryFormat::Contiguous), shape);
 }
 
 Tensor _reshape_copy_symint(const Tensor& self, c10::SymIntArrayRef proposed_shape) {
   if (self.is_sparse()) {
     TORCH_CHECK(0, "_reshape_copy is not implemented for sparse tensors");
   }
-  c10::SymDimVector shape = infer_size_dv(proposed_shape, self.sym_numel());
-
   if (self.is_mkldnn()) {
     TORCH_CHECK(0, "_reshape_copy not implemented for mkldnn tensors");
   }
 
-  if (self.is_contiguous()) {
-    return self.view_symint(shape).clone(at::MemoryFormat::Contiguous);
-  } else {
-    return at::_unsafe_view_symint(self.clone(at::MemoryFormat::Contiguous), shape);
+  c10::SymDimVector shape = infer_size_dv(proposed_shape, self.sym_numel());
+  auto stride = at::detail::computeStride(self.sym_sizes(), self.sym_strides(), shape);
+
+  if (stride.has_value()) {
+    auto maybe_cow_storage_impl = self.storage().unsafeGetStorageImpl()->copy_on_write();
+    if (maybe_cow_storage_impl) {
+      // Tensor is eligible for copy-on-write
+      auto self_ = at::detail::make_tensor<TensorImpl>(
+        Storage(std::move(maybe_cow_storage_impl)), self.key_set(), self.dtype());
+      auto* self_tmp_ = self_.unsafeGetTensorImpl();
+      self_tmp_->set_sizes_and_strides(self.sym_sizes(), stride.value(), self.sym_storage_offset());
+      return self_;
+    }
   }
+
+  // Just do a regular copy
+  return at::_unsafe_view_symint(self.clone(at::MemoryFormat::Contiguous), shape);
 }
 
 // Duplicate of above code for non-symbolic ints. Kept for BC purposes and to
 // minimize breakages.
-Tensor reshape(const Tensor& self, IntArrayRef proposed_shape) {
-  if (self.is_sparse()) {
-    AT_ERROR("reshape is not implemented for sparse tensors");
-  }
-  DimVector shape = infer_size_dv(proposed_shape, self.numel());
 
-  if (self.is_mkldnn()) {
-    return at::_mkldnn_reshape(self, shape);
-  }
+Tensor reshape_symint(const Tensor& self, c10::SymIntArrayRef proposed_shape, bool copy) {
+  return _reshape(self, proposed_shape, copy);
+}
 
-  // `computeStride` returns the proper strides to use if this
-  // `reshape` can be just a view.
-  auto stride = at::detail::computeStride(self.sizes(), self.strides(), shape);
-
-  // NB: Even though we have viewable geometry and the target strides here,
-  //     we do not just call `as_strided` on `self` because the backward
-  //     for `as_strided` is not as efficient as that of `view` (since the
-  //     former is meant to handle general cases).
-  //
-  //     Similarly we don't call `view` because it duplicates some of the work
-  //     we've already done, and instead call our internal/private operator
-  //     `_reshape_alias` that essentially does the same thing as `view` and
-  //     `as_strided` without any of the extra overhead.
-  if (stride.has_value()) {
-    // Temporary check to revert to the old behavior/view in cases where the
-    // device is not supported (e.g. for XLA the operation is not supported
-    // so we use `view` instead).
-    //
-    // We need to do the checks here instead of in `native_functions.yaml`
-    // to preserve backwards compatibility.
-    if (!self.is_xla() && !self.is_lazy() && !self.is_ipu()) {
-      return self._reshape_alias(shape, stride.value());
-    } else {
-      return self.view(shape);
-    }
-  }
-  return at::_unsafe_view(self.clone(at::MemoryFormat::Contiguous), shape);
+Tensor reshape(const Tensor& self, IntArrayRef proposed_shape, bool copy) {
+  return _reshape(self, proposed_shape, copy);
 }
 
 Tensor _reshape_alias(const Tensor& self, IntArrayRef sizes, IntArrayRef strides) {
