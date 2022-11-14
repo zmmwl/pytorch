@@ -5587,6 +5587,19 @@ def sample_inputs_masked_fill(op_info, device, dtype, requires_grad, **kwargs):
         # `self` and `mask` on CUDA but `value` is a CPU scalar tensor.
         yield SampleInput(make_arg((S, S)), args=(torch.randn(S, S, device=device) > 0, torch.randn(())))
 
+def reference_inputs_masked_fill(op_info, device, dtype, requires_grad, **kwargs):
+    yield from sample_inputs_masked_fill(op_info, device, dtype, requires_grad, **kwargs)
+
+    # masked_fill() ref used to use item(), make sure the reported repro works.
+    # we specifically need device='cuda' for this one
+    # https://github.com/pytorch/pytorch/issues/81018 (repro)
+    # https://github.com/pytorch/pytorch/pull/82737 (context)
+    if torch.device(device).type == 'cuda':
+        a = torch.randn(5, device=device)
+        mask = torch.ones(5, dtype=torch.bool, device=device)
+        value = torch.tensor(float('inf'), device=torch.device('cpu'))  # different device
+        yield SampleInput(a, args=(mask, value))
+
 def error_inputs_masked_fill(op_info, device, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=torch.float, requires_grad=False)
     # `value` is not a 0-D tensor.
@@ -10145,6 +10158,7 @@ op_db: List[OpInfo] = [
     OpInfo('masked_fill',
            dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16, torch.chalf),
            sample_inputs_func=sample_inputs_masked_fill,
+           reference_inputs_func=reference_inputs_masked_fill,
            error_inputs_func=error_inputs_masked_fill,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
@@ -18642,9 +18656,6 @@ python_ref_db = [
         "_refs.masked_fill",
         torch_opinfo_name="masked_fill",
         supports_nvfuser=False,
-        skips=(
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_errors'),
-        ),
     ),
     PythonRefInfo(
         "_refs.where",
