@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 from enum import Enum
 from typing import Dict, Iterator, List, Optional, Sequence, Set, Tuple, TypeVar, Union
+import contextlib
 
 from torchgen.model import (
     Argument,
@@ -17,11 +18,6 @@ from torchgen.model import (
 
 _T = TypeVar("_T")
 
-TENSOR_LIST_LIKE_CTYPES = [
-    "at::TensorList",
-    "const c10::List<c10::optional<at::Tensor>> &",
-    "const at::ITensorListRef &",
-]
 
 # An ArgName is just the str name of the argument in schema;
 # but in some special circumstances, we may add a little extra
@@ -31,10 +27,59 @@ TENSOR_LIST_LIKE_CTYPES = [
 SpecialArgName = Enum("SpecialArgName", ("possibly_redundant_memory_format",))
 ArgName = Union[str, SpecialArgName]
 
+
+# Enable lazy initialization of namespaces
+class Namespace:
+    def __init__(self, val: Optional[str]):
+        self._val = val
+
+    def __str__(self) -> Optional[str]:
+        return self._val
+
+    def __hash__(self) -> int:
+        return hash(self._val)
+
+    def __eq__(self, other: Union["Namespace", str]) -> bool:
+        if isinstance(other, str):
+            return self._val == other
+        elif isinstance(other, Namespace):
+            return self._val == other._val
+
+
+# By default use "at" and "c10" namespace for tensor and container respectively
+tensorNamespace: str = Namespace("at")
+containerNamespace: str = Namespace("c10")
+
+TENSOR_LIST_LIKE_CTYPES = [
+    f"{tensorNamespace}::TensorList",
+    f"const {containerNamespace}::List<{containerNamespace}::optional<{tensorNamespace}::Tensor>> &",
+    f"const {containerNamespace}::ITensorListRef &",
+]
+
+# Override default Tensor namespace
+@contextlib.contextmanager
+def using_tensor_namespace(tensor: str) -> Generator[None, None, None]:
+    global tensorNamespace
+    tensorNamespace, prev_tensor_ns = Namespace(tensor), tensorNamespace
+    try:
+        yield
+    finally:
+        tensorNamespace = prev_tensor_ns
+
+# Override default container namespace
+@contextlib.contextmanager
+def using_container_namespace(container: str) -> Generator[None, None, None]:
+    global containerNamespace
+    containerNamespace, prev_container_ns = Namespace(container), containerNamespace
+    try:
+        yield
+    finally:
+        containerNamespace = prev_container_ns
+
 # This class shouldn't be created directly; instead, use/create one of the singletons below.
 @dataclass(frozen=True)
 class BaseCppType:
-    ns: Optional[str]
+    ns: Union[Optional[str], Namespace]
     name: str
 
     def __str__(self) -> str:
@@ -53,44 +98,44 @@ shortT = BaseCppType("", "int16_t")
 # define intT to make it obvious when you've stuffed it up
 int32T = BaseCppType("", "int32_t")
 longT = BaseCppType("", "int64_t")
-halfT = BaseCppType("at", "Half")
+halfT = BaseCppType(tensorNamespace, "Half")
 doubleT = BaseCppType("", "double")
 floatT = BaseCppType("", "float")
 complexHalfT = BaseCppType(
-    "c10", "complex<c10::Half>"
+    containerNamespace, "complex<c10::Half>"
 )  # stuffing template param here is an abuse
-complexFloatT = BaseCppType("c10", "complex<float>")
-complexDoubleT = BaseCppType("c10", "complex<double>")
+complexFloatT = BaseCppType(containerNamespace, "complex<float>")
+complexDoubleT = BaseCppType(containerNamespace, "complex<double>")
 boolT = BaseCppType("", "bool")
-bfloat16T = BaseCppType("at", "BFloat16")
+bfloat16T = BaseCppType(tensorNamespace, "BFloat16")
 voidT = BaseCppType("", "void")
-stringT = BaseCppType("c10", "string_view")
-generatorT = BaseCppType("at", "Generator")
-scalarTypeT = BaseCppType("at", "ScalarType")
-tensorT = BaseCppType("at", "Tensor")
-optionalTensorRefT = BaseCppType("at", "OptionalTensorRef")
-tensorListT = BaseCppType("at", "TensorList")
-iTensorListRefT = BaseCppType("at", "ITensorListRef")
-iOptTensorListRefT = BaseCppType("at", "IOptTensorListRef")
-dimnameT = BaseCppType("at", "Dimname")
-dimnameListT = BaseCppType("at", "DimnameList")
-dimVectorT = BaseCppType("at", "DimVector")
-layoutT = BaseCppType("at", "Layout")
-deviceT = BaseCppType("at", "Device")
-scalarT = BaseCppType("at", "Scalar")
-optionalScalarRefT = BaseCppType("at", "OptionalScalarRef")
-memoryFormatT = BaseCppType("at", "MemoryFormat")
-qschemeT = BaseCppType("at", "QScheme")
-storageT = BaseCppType("at", "Storage")
-streamT = BaseCppType("at", "Stream")
-intArrayRefT = BaseCppType("at", "IntArrayRef")
-optionalIntArrayRefT = BaseCppType("at", "OptionalIntArrayRef")
-optionalSymIntArrayRefT = BaseCppType("at", "OptionalSymIntArrayRef")
-tensorOptionsT = BaseCppType("at", "TensorOptions")
+stringT = BaseCppType(containerNamespace, "string_view")
+generatorT = BaseCppType(tensorNamespace, "Generator")
+scalarTypeT = BaseCppType(tensorNamespace, "ScalarType")
+tensorT = BaseCppType(tensorNamespace, "Tensor")
+optionalTensorRefT = BaseCppType(tensorNamespace, "OptionalTensorRef")
+tensorListT = BaseCppType(tensorNamespace, "TensorList")
+iTensorListRefT = BaseCppType(tensorNamespace, "ITensorListRef")
+iOptTensorListRefT = BaseCppType(tensorNamespace, "IOptTensorListRef")
+dimnameT = BaseCppType(tensorNamespace, "Dimname")
+dimnameListT = BaseCppType(tensorNamespace, "DimnameList")
+dimVectorT = BaseCppType(tensorNamespace, "DimVector")
+layoutT = BaseCppType(tensorNamespace, "Layout")
+deviceT = BaseCppType(tensorNamespace, "Device")
+scalarT = BaseCppType(tensorNamespace, "Scalar")
+optionalScalarRefT = BaseCppType(tensorNamespace, "OptionalScalarRef")
+memoryFormatT = BaseCppType(tensorNamespace, "MemoryFormat")
+qschemeT = BaseCppType(tensorNamespace, "QScheme")
+storageT = BaseCppType(tensorNamespace, "Storage")
+streamT = BaseCppType(tensorNamespace, "Stream")
+intArrayRefT = BaseCppType(tensorNamespace, "IntArrayRef")
+optionalIntArrayRefT = BaseCppType(tensorNamespace, "OptionalIntArrayRef")
+optionalSymIntArrayRefT = BaseCppType(tensorNamespace, "OptionalSymIntArrayRef")
+tensorOptionsT = BaseCppType(tensorNamespace, "TensorOptions")
 typeAndSizeT = BaseCppType("torch::autograd::generated", "TypeAndSize")
-tensorGeometryT = BaseCppType("at", "TensorGeometry")
-SymIntT = BaseCppType("c10", "SymInt")
-symIntArrayRefT = BaseCppType("c10", "SymIntArrayRef")
+tensorGeometryT = BaseCppType(tensorNamespace, "TensorGeometry")
+SymIntT = BaseCppType(containerNamespace, "SymInt")
+symIntArrayRefT = BaseCppType(containerNamespace, "SymIntArrayRef")
 
 # Types representing template parameters.  Technically, we probably shouldn't
 # represent them this way in codegen, but it was pretty convenient.
@@ -190,10 +235,10 @@ class OptionalCType:
 
     def cpp_type(self, *, strip_ref: bool = False) -> str:
         # Do not pass `strip_ref` recursively.
-        return f"c10::optional<{self.elem.cpp_type()}>"
+        return f"{containerNamespace}::optional<{self.elem.cpp_type()}>"
 
     def cpp_type_registration_declarations(self) -> str:
-        return f"c10::optional<{self.elem.cpp_type_registration_declarations()}>"
+        return f"{containerNamespace}::optional<{self.elem.cpp_type_registration_declarations()}>"
 
     def remove_const_ref(self) -> "CType":
         return OptionalCType(self.elem.remove_const_ref())
@@ -205,10 +250,10 @@ class ListCType:
 
     def cpp_type(self, *, strip_ref: bool = False) -> str:
         # Do not pass `strip_ref` recursively.
-        return f"c10::List<{self.elem.cpp_type()}>"
+        return f"{containerNamespace}::List<{self.elem.cpp_type()}>"
 
     def cpp_type_registration_declarations(self) -> str:
-        return f"c10::List<{self.elem.cpp_type_registration_declarations()}>"
+        return f"{containerNamespace}::List<{self.elem.cpp_type_registration_declarations()}>"
 
     def remove_const_ref(self) -> "CType":
         return ListCType(self.elem.remove_const_ref())

@@ -27,6 +27,7 @@ from torchgen.model import (
 )
 from torchgen.native_function_generation import add_generated_native_functions
 from torchgen.selective_build.selector import SelectiveBuilder
+from torchgen.types import tensorT, ListCType, using_tensor_namespace, using_container_namespace
 
 
 class TestCreateDerivative(unittest.TestCase):
@@ -87,7 +88,7 @@ class TestCreateDerivative(unittest.TestCase):
         native_function = dataclasses.replace(DEFAULT_NATIVE_FUNCTION, func=schema)
 
         with self.assertRaisesRegex(
-            RuntimeError, 'illegally mixes use of "grad_RETURN_NAME"'
+                RuntimeError, 'illegally mixes use of "grad_RETURN_NAME"'
         ):
             load_derivatives.create_differentiability_info(
                 defn_dict={
@@ -185,8 +186,8 @@ class TestGenAutogradFunctions(unittest.TestCase):
         native_function = dataclasses.replace(DEFAULT_NATIVE_FUNCTION, func=schema)
 
         with self.assertRaisesRegex(
-            RuntimeError,
-            "Invalid dispatch key AutogradRandomTensor in derivatives.yaml for",
+                RuntimeError,
+                "Invalid dispatch key AutogradRandomTensor in derivatives.yaml for",
         ):
             load_derivatives.create_differentiability_info(
                 defn_dict={
@@ -495,6 +496,27 @@ class TestStaticDispatchGeneratrion(unittest.TestCase):
         )
 
 
+class TestNamespaceOverride(unittest.TestCase):
+    def test_tensor_namespace_override_generates_correct_code(self) -> None:
+        with using_tensor_namespace("custom"):
+            self.assertEquals(str(tensorT), "custom::Tensor")
+        self.assertEquals(str(tensorT), "at::Tensor")
+
+    def test_container_namespace_override_generates_correct_code(self) -> None:
+        with using_container_namespace("custom"):
+            tensor_list = ListCType(tensorT)
+            self.assrtEquals(str(tensor_list), "custom::List<at::Tensor>")
+        default_tensor_list = ListCType(tensorT)
+        self.assertEquals(str(default_tensor_list), "c10::List<at::Tensor>")
+
+    def test_both_tensor_and_container_namespace_override_generates_correct_code(self) -> None:
+        with using_container_namespace("custom"), using_tensor_namespace("foo"):
+            tensor_list = ListCType(tensorT)
+            self.assrtEquals(str(tensor_list), "custom::List<foo::Tensor>")
+        default_tensor_list = ListCType(tensorT)
+        self.assertEquals(str(default_tensor_list), "c10::List<at::Tensor>")
+
+
 # Represents the most basic NativeFunction. Use dataclasses.replace()
 # to edit for use.
 DEFAULT_NATIVE_FUNCTION, _ = torchgen.model.NativeFunction.from_yaml(
@@ -502,7 +524,6 @@ DEFAULT_NATIVE_FUNCTION, _ = torchgen.model.NativeFunction.from_yaml(
     loc=torchgen.model.Location(__file__, 1),
     valid_tags=set(),
 )
-
 
 if __name__ == "__main__":
     unittest.main()
