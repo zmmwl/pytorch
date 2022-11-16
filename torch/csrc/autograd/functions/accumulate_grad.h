@@ -42,13 +42,22 @@ struct TORCH_API AccumulateGrad : public Node {
 
   variable_list apply(variable_list&& grads) override;
 
-  static at::Tensor callHooks(const Variable& variable, at::Tensor new_grad) {
-    for (auto& hook : impl::hooks(variable)) {
-      new_grad = (*hook)({new_grad})[0];
+  std::vector<std::unique_ptr<FunctionPreHook>>& tensor_pre_hooks() noexcept
+      override {
+    // We cannot directly store hooks registered to the tensor on this
+    // AccumulateGrad node because someone can attempt to register a hook
+    // before another node is able to keep AccumulateGrad alive
+    const int64_t new_hooks_version = impl::_get_hooks_version(variable);
+    if (hooks_version_ != new_hooks_version) {
+      tensor_pre_hook_.clear();
+      if (!impl::hooks(variable).empty()) {
+        tensor_pre_hook_.push_back(
+            std::make_unique<CombinedFunctionPreHook>(impl::hooks(variable)));
+      }
+      hooks_version_ = new_hooks_version;
     }
-    return new_grad;
+    return tensor_pre_hook_;
   }
-
   // Given a variable with its current grad as variable_grad, accumulates
   // new_grad into variable_grad if in place accumulation is possible.
   // Otherwise, uses 'update_grad' to update the grad for the variable.
@@ -247,6 +256,8 @@ struct TORCH_API AccumulateGrad : public Node {
   }
 
   Variable variable;
+  std::vector<std::unique_ptr<FunctionPreHook>> tensor_pre_hook_;
+  int64_t hooks_version_ = -1;
 };
 
 #undef CHECK_RESULT
