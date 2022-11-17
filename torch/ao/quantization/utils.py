@@ -12,6 +12,13 @@ from collections import OrderedDict
 from inspect import signature
 from inspect import getfullargspec
 
+__all__ = [
+    "NodePattern",
+    "Pattern",
+    "MatchAllNode",
+    "get_fqn_to_example_inputs",
+]
+
 NodePattern = Union[Tuple[Node, Node], Tuple[Node, Tuple[Node, Node]], Any]
 NodePattern.__module__ = "torch.ao.quantization.utils"
 
@@ -37,7 +44,7 @@ class MatchAllNode:
     """
     pass
 
-module_type_list = {
+_module_type_list = {
     torch.nn.ReLU,
     torch.nn.ReLU6,
     torch.nn.AdaptiveAvgPool1d,
@@ -54,7 +61,7 @@ module_type_list = {
     torch.nn.Sigmoid,
     torch.nn.Tanh,
 }
-func_list = {
+_func_list = {
     torch.nn.functional.adaptive_avg_pool1d,
     torch.nn.functional.adaptive_avg_pool2d,
     torch.nn.functional.adaptive_avg_pool3d,
@@ -84,7 +91,7 @@ func_list = {
     torch.unsqueeze,
     torch.cat,
 }
-method_list = {
+_method_list = {
     torch.mean,
     'relu',
     'relu_',
@@ -112,35 +119,27 @@ method_list = {
     'view',
 }
 
-# TODO: not used now, remove
-def check_node(node, modules):
-    # TODO: reuse is_fixed_qparam_node after we move this function to _lower_to_native_backend.py
-    is_call_function = node.op == "call_function" and node.target in func_list
-    is_call_method = node.op == "call_method" and node.target in method_list
-    is_call_module = node.op == "call_module" and type(modules[str(node.target)]) in module_type_list
-    return is_call_function, is_call_method, is_call_module
-
-def get_combined_dict(default_dict, additional_dict):
+def _get_combined_dict(default_dict, additional_dict):
     d = default_dict.copy()
     d.update(additional_dict)
     return d
 
-def is_per_tensor(qscheme):
+def _is_per_tensor(qscheme):
     return qscheme == torch.per_tensor_affine or \
         qscheme == torch.per_tensor_symmetric
 
-def is_per_channel(qscheme):
+def _is_per_channel(qscheme):
     return qscheme in [torch.per_channel_affine,
                        torch.per_channel_affine_float_qparams,
                        torch.per_channel_symmetric]
 
-def getattr_from_fqn(obj: Any, fqn: str) -> Any:
+def _getattr_from_fqn(obj: Any, fqn: str) -> Any:
     """
     Given an obj and a fqn such as "foo.bar.baz", returns gm.foo.bar.baz.
     """
     return functools.reduce(getattr, fqn.split("."), obj)
 
-def to_underlying_dtype(qdtype):
+def _to_underlying_dtype(qdtype):
     DTYPE_MAPPING = {
         torch.quint8: torch.uint8,
         torch.qint8: torch.int8,
@@ -151,7 +150,7 @@ def to_underlying_dtype(qdtype):
     assert qdtype in DTYPE_MAPPING, "Unsupported dtype: " + qdtype
     return DTYPE_MAPPING[qdtype]
 
-def get_qparam_dict(observer_or_fake_quant):
+def _get_qparam_dict(observer_or_fake_quant):
     qscheme = observer_or_fake_quant.qscheme if hasattr(observer_or_fake_quant, "qscheme") else None
     dtype = observer_or_fake_quant.dtype
     qparams = {"qscheme": qscheme, "dtype": dtype}
@@ -159,9 +158,9 @@ def get_qparam_dict(observer_or_fake_quant):
     if not qscheme:
         return qparams
 
-    if is_per_tensor(qscheme):
+    if _is_per_tensor(qscheme):
         qscheme = torch.per_tensor_affine
-    elif is_per_channel(qscheme):
+    elif _is_per_channel(qscheme):
         # change symmetric to affine since we do not have symmetric
         # quantized Tensor
         if qscheme == torch.per_channel_symmetric:
@@ -180,7 +179,7 @@ def get_qparam_dict(observer_or_fake_quant):
     return qparams
 
 
-def get_swapped_custom_module_class(custom_module, custom_module_class_mapping, qconfig):
+def _get_swapped_custom_module_class(custom_module, custom_module_class_mapping, qconfig):
     """ Get the observed/quantized custom module class that we need
     to swap `custom_module` to
     Input:
@@ -191,79 +190,79 @@ def get_swapped_custom_module_class(custom_module, custom_module_class_mapping, 
     Output:
         corresponding observed/quantized custom module class for input custom module instance
     """
-    quant_type = get_quant_type(qconfig)
+    quant_type = _get_quant_type(qconfig)
     class_mapping = custom_module_class_mapping.get(quant_type, {})
     assert type(custom_module) in class_mapping, "did not find corresponding observed " \
         "module class for {} in mapping: {}".format(type(custom_module), class_mapping)
     return class_mapping[type(custom_module)]
 
-def activation_dtype(qconfig):
+def _activation_dtype(qconfig):
     assert qconfig is not None
     activation = qconfig.activation()
     return activation.dtype
 
-def weight_dtype(qconfig):
+def _weight_dtype(qconfig):
     assert qconfig is not None
     weight = qconfig.weight()
     return weight.dtype
 
-def activation_is_statically_quantized(qconfig):
+def _activation_is_statically_quantized(qconfig):
     """ Given a qconfig, decide if the activation needs to be
     quantized or not, this includes quantizing to quint8, qint8 and qint32 and float16
     """
     return (
-        activation_dtype(qconfig) in [torch.quint8, torch.qint8, torch.qint32, torch.float16]
-        and (not activation_is_dynamically_quantized(qconfig))
+        _activation_dtype(qconfig) in [torch.quint8, torch.qint8, torch.qint32, torch.float16]
+        and (not _activation_is_dynamically_quantized(qconfig))
     )
 
-def activation_is_dynamically_quantized(qconfig):
+def _activation_is_dynamically_quantized(qconfig):
     """ Given a qconfig, decide if the activation needs to be
     dynamically quantized or not, this includes dynamically quantizing to
     quint8, qint8 and float16
     """
     activation_dtype, _, activation_compute_dtype = \
-        get_qconfig_dtypes(qconfig)
+        _get_qconfig_dtypes(qconfig)
     return activation_compute_dtype in [torch.quint8, torch.qint8, torch.float16]
 
-def activation_is_int8_quantized(qconfig):
+def _activation_is_int8_quantized(qconfig):
     """ Given a qconfig, decide if the activation needs to be
     quantized to int8 or not, this includes quantizing to quint8, qint8
     """
-    return activation_dtype(qconfig) in [torch.quint8, torch.qint8]
+    return _activation_dtype(qconfig) in [torch.quint8, torch.qint8]
 
-def activation_is_int32_quantized(qconfig):
+def _activation_is_int32_quantized(qconfig):
     """ Given a qconfig, decide if the activation needs to be
     quantized to int32 or not
     """
-    return activation_dtype(qconfig) == torch.qint32
+    return _activation_dtype(qconfig) == torch.qint32
 
-def weight_is_quantized(qconfig):
+def _weight_is_quantized(qconfig):
     """ Given a qconfig, decide if the weight needs to be
     quantized or not
     """
-    return weight_dtype(qconfig) in [torch.quint8, torch.qint8, torch.float16, torch.quint4x2]
+    return _weight_dtype(qconfig) in [torch.quint8, torch.qint8, torch.float16, torch.quint4x2]
 
-def weight_is_statically_quantized(qconfig):
+def _weight_is_statically_quantized(qconfig):
     """ Given a qconfig, decide if the weight needs to be statically
     quantized or not
     """
-    return weight_dtype(qconfig) in [torch.quint8, torch.qint8]
+    return _weight_dtype(qconfig) in [torch.quint8, torch.qint8]
 
-def op_is_int8_dynamically_quantized(qconfig) -> bool:
+def _op_is_int8_dynamically_quantized(qconfig) -> bool:
     """ Given a qconfig, returns True if this op is using int8 dynamic
     quantization
     """
     activation_dtype, weight_dtype, activation_compute_dtype = \
-        get_qconfig_dtypes(qconfig)
+        _get_qconfig_dtypes(qconfig)
     return (
-        activation_dtype is torch.quint8 and
+        _activation_dtype is torch.quint8 and
         # for now, the lines below assume fbgemm or qnnpack
         weight_dtype is torch.qint8 and
         activation_compute_dtype is torch.quint8
         # TODO(future PR): add is_dynamic
     )
 
-def get_qconfig_dtypes(qconfig):
+def _get_qconfig_dtypes(qconfig):
     r""" returns the qconfig tuple for qconfig:
     (activation_dtype, weight_dtype, activation_compute_dtype)
     """
@@ -273,7 +272,7 @@ def get_qconfig_dtypes(qconfig):
     compute_dtype = activation.compute_dtype if hasattr(activation, 'compute_dtype') else None
     return (activation.dtype, weight.dtype, compute_dtype)
 
-def get_quant_type(qconfig):
+def _get_quant_type(qconfig):
     assert qconfig is not None
     activation = qconfig.activation()
     weight = qconfig.weight()
@@ -292,10 +291,10 @@ def get_quant_type(qconfig):
         elif activation.dtype == torch.float16:
             return QuantType.STATIC
 
-    raise Exception("Unrecognized dtype combination in get_quant_type: activation({}),"
+    raise Exception("Unrecognized dtype combination in _get_quant_type: activation({}),"
                     "weight({})".format(activation.dtype, weight.dtype))
 
-def check_min_max_valid(min_val: torch.Tensor, max_val: torch.Tensor) -> bool:
+def _check_min_max_valid(min_val: torch.Tensor, max_val: torch.Tensor) -> bool:
     """ Checks if the given minimum and maximum values are valid, meaning that
     they exist and the min value is less than the max value.
     """
@@ -326,8 +325,8 @@ def check_min_max_valid(min_val: torch.Tensor, max_val: torch.Tensor) -> bool:
     return True
 
 
-def calculate_qmin_qmax(quant_min: int, quant_max: int, has_customized_qrange: bool, dtype: torch.dtype,
-                        reduce_range: bool) -> Tuple[int, int]:
+def _calculate_qmin_qmax(quant_min: int, quant_max: int, has_customized_qrange: bool, dtype: torch.dtype,
+                         reduce_range: bool) -> Tuple[int, int]:
     r"""Calculates actual qmin and qmax based on the quantization range,
     observer datatype and if range is reduced.
     """
@@ -389,7 +388,7 @@ def _parent_name(target):
     else:
         return r[0], r[1]
 
-def has_no_children_ignoring_parametrizations(module):
+def _has_no_children_ignoring_parametrizations(module):
     """
     Checks if module._modules is empty or
     if module is a parametrization, checks that module._modules only has
@@ -545,32 +544,3 @@ def get_fqn_to_example_inputs(
         # restore the module call even if there is an exception
         torch.nn.Module.__call__ = orig_module_call
     return fqn_to_example_inputs
-
-__all__ = [
-    "NodePattern",
-    "Pattern",
-    "MatchAllNode",
-    "check_node",
-    "get_combined_dict",
-    "is_per_tensor",
-    "is_per_channel",
-    "getattr_from_fqn",
-    "get_qparam_dict",
-    "get_swapped_custom_module_class",
-    "activation_dtype",
-    "weight_dtype",
-    "activation_is_statically_quantized",
-    "activation_is_dynamically_quantized",
-    "activation_is_int8_quantized",
-    "activation_is_int32_quantized",
-    "weight_is_quantized",
-    "weight_is_statically_quantized",
-    "op_is_int8_dynamically_quantized",
-    "get_qconfig_dtypes",
-    "get_quant_type",
-    "check_min_max_valid",
-    "calculate_qmin_qmax",
-    "has_no_children_ignoring_parametrizations",
-    "get_fqn_to_example_inputs",
-    "to_underlying_dtype",
-]

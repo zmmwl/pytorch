@@ -17,7 +17,7 @@ from torch.ao.quantization.quantization_mappings import (
     _has_special_act_post_process,
     _get_special_act_post_process,
 )
-from .utils import get_qparam_dict, has_no_children_ignoring_parametrizations
+from .utils import _get_qparam_dict, _has_no_children_ignoring_parametrizations
 from torch.ao.quantization.stubs import DeQuantStub, QuantWrapper
 from torch.ao.quantization.qconfig import (
     _add_module_to_qconfig_obs_ctr,
@@ -223,7 +223,7 @@ def _add_observer_(module, qconfig_propagation_list=None, non_leaf_module_list=N
 
     # Insert observers only for leaf nodes, note that this observer is for
     # the output of the module, for input QuantStub will observe them
-    if has_no_children_ignoring_parametrizations(module) and not isinstance(module, torch.nn.Sequential) \
+    if _has_no_children_ignoring_parametrizations(module) and not isinstance(module, torch.nn.Sequential) \
        and type_before_parametrizations(module) in qconfig_propagation_list:
         insert_activation_post_process(module)
 
@@ -246,7 +246,7 @@ def add_quant_dequant(module):
         wraps the input module, the latter case only happens when the input
         module is a leaf module and we want to quantize it.
     """
-    if has_no_children_ignoring_parametrizations(module) and hasattr(module, 'qconfig') and module.qconfig:
+    if _has_no_children_ignoring_parametrizations(module) and hasattr(module, 'qconfig') and module.qconfig:
         return QuantWrapper(module)
 
     for name, child in module.named_children():
@@ -611,7 +611,7 @@ def swap_module(mod, mapping, custom_module_class_mapping):
                 assert mod.qconfig is not None
                 weight_post_process = mod.qconfig.weight()
                 weight_post_process(mod.weight)
-                weight_qparams = get_qparam_dict(weight_post_process)
+                weight_qparams = _get_qparam_dict(weight_post_process)
                 new_mod = qmod.from_float(mod, weight_qparams)
             else:
                 new_mod = qmod.from_float(mod)
