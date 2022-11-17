@@ -32,7 +32,7 @@ from .ir import (
     TensorBox,
     View,
 )
-from .utils import ceildiv, has_torchvision_roi_align, sympy_product
+from .utils import ceildiv, DTYPE_TO_BYTES, has_torchvision_roi_align, sympy_product
 from .virtualized import ops, V
 
 log = logging.getLogger(__name__)
@@ -360,12 +360,12 @@ def make_pointwise(
 
 
 @register_lowering(prims.convert_element_type, type_promotion_kind=None)
-def to_dtype(x: TensorBox, dtype: torch.dtype):
+def to_dtype(x: TensorBox, dtype: torch.dtype, bitcast=False):
     if x.get_dtype() == dtype:
         return x
 
     def _to_dtype(x):
-        return ops.to_dtype(x, dtype)
+        return ops.to_dtype(x, dtype, bitcast)
 
     return make_pointwise(_to_dtype, override_return_dtype=dtype)(x)
 
@@ -700,10 +700,27 @@ def repeat(x, repeats):
 @register_lowering(aten._unsafe_view, type_promotion_kind=None)
 @register_lowering(aten.view, type_promotion_kind=None)
 @register_lowering(aten.reshape, type_promotion_kind=None)
-def view(x, sizes):
+def view(x, sizes_or_dtype):
+    # view could also take dtype as its parameter
+    if isinstance(sizes_or_dtype, torch.dtype):
+        new_dtype = sizes_or_dtype
+        old_dtype = x.get_dtype()
+
+        if old_dtype == new_dtype:
+            return x
+
+        if (
+            DTYPE_TO_BYTES[new_dtype] != DTYPE_TO_BYTES[old_dtype]
+            or DTYPE_TO_BYTES[new_dtype] == 2
+        ):
+            x.realize()
+            return fallback_handler(aten.view)(x, new_dtype)
+
+        return to_dtype(x, new_dtype, bitcast=True)
+
     assert isinstance(x, TensorBox)
-    assert isinstance(sizes, (list, tuple))
-    return TensorBox(View.create(x.data, sizes))
+    assert isinstance(sizes_or_dtype, (list, tuple))
+    return TensorBox(View.create(x.data, sizes_or_dtype))
 
 
 @register_lowering(aten.permute, type_promotion_kind=None)

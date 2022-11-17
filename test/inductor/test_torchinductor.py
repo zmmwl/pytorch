@@ -978,6 +978,31 @@ class CommonTemplate:
             ),
         )
 
+    def test_view_dtype(self):
+        def fn(i8_tensor, f16_tensor, f32_tensor, f64_tensor):
+            return (
+                i8_tensor.view(torch.bool),
+                i8_tensor.view(torch.uint8),
+                f16_tensor.view(torch.int16),
+                f32_tensor.view(torch.bool),
+                f32_tensor.view(torch.float16),
+                f32_tensor.view(torch.int32),
+                f32_tensor.view(torch.float64),
+                f64_tensor.view(torch.int64),
+                f64_tensor.view(torch.int8),
+            )
+
+        self.common(
+            fn,
+            (
+                torch.randint(-128, 127, (3, 4), dtype=torch.int8),
+                torch.randn(3, 4, dtype=torch.float16),
+                torch.randn(3, 4, dtype=torch.float32),
+                torch.randn(3, 4, dtype=torch.float64),
+            ),
+            check_lowp=False,
+        )
+
     def test_relu(self):
         def fn(a, b):
             return (torch.relu(a), torch.relu(a + b) / 10)
