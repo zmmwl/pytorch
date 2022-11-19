@@ -5,6 +5,8 @@ import hashlib
 from itertools import count
 from typing import Any, Dict, List
 
+from sympy import Expr
+
 from .. import codecache, config, ir
 from ..utils import dynamo_utils, has_triton, sympy_dot, sympy_product
 from ..virtualized import V
@@ -392,6 +394,9 @@ class WrapperCodeGen(CodeGen):
                 )
 
             for name, value in V.graph.graph_inputs.items():
+                # TODO: this is probably wrong
+                if isinstance(value, Expr):
+                    continue
                 shape = [V.graph.sizevars.size_hint(x) for x in value.get_size()]
                 stride = [V.graph.sizevars.size_hint(x) for x in value.get_stride()]
                 add_fake_input(
