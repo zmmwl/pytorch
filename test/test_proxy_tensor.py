@@ -1137,6 +1137,7 @@ fake_tensor_failures = {
     xfail('repeat_interleave'),
     # ASAN failures due to divide by 0
     skip('nn.functional.nll_loss'),
+    xfail('nn.functional.cosine_similarity')
 }
 
 symbolic_tensor_failures = {

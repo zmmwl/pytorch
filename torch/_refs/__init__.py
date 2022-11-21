@@ -2035,6 +2035,7 @@ def _reduction(
     if keepdims:
         output_shape = [a.shape[i] if i not in dims else 1 for i in range(a.ndim)]
         broadcast_dims = [i for i in range(a.ndim) if i not in dims]
+        print("BLA")
         result = prims.broadcast_in_dim(result, output_shape, broadcast_dims)
 
     if out is not None:
