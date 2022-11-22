@@ -1141,7 +1141,6 @@ fake_tensor_failures = {
 
 symbolic_tensor_failures = {
     # Needs complex-value support
-    xfail('polar'),
     xfail('linalg.eig'),
     xfail('linalg.eigvals'),
     skip('masked.logsumexp', ''),  # Tensors of type TensorImpl do not have numel
