@@ -487,7 +487,7 @@ std::tuple<Tensor, optional<int64_t>> expand_batch_rule(
 }
 
 std::tuple<Tensor, optional<int64_t>> unfold_batch_rule(
-    const Tensor &self, optional<int64_t> self_bdim, int64_t dim, int64_t size, int64_t step)
+    const Tensor &self, optional<int64_t> self_bdim, int64_t dim, SymInt size, int64_t step)
 {
   TORCH_INTERNAL_ASSERT(self_bdim.has_value());
   auto self_ = moveBatchDimToFront(self, self_bdim);
@@ -496,7 +496,7 @@ std::tuple<Tensor, optional<int64_t>> unfold_batch_rule(
   if (logical_rank==0) {
     self_ = self_.unsqueeze(-1);
   }
-  auto result = self_.unfold(dim, size, step);
+  auto result = self_.unfold_symint(dim, size, step);
   if (logical_rank==0) {
     result = result.squeeze(-1);
   }

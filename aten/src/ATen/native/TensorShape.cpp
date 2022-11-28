@@ -3593,10 +3593,10 @@ Tensor unfold(const Tensor& self, int64_t d, int64_t size, int64_t step) {
   auto ndim = self.dim();
   d = at::maybe_wrap_dim(d, ndim, /*wrap_scalar=*/true);
 
-  auto sizes = self.sizes().vec();
-  auto strides = self.strides().vec();
-  int64_t max_size = self.dim() == 0 ? 1 : sizes[d];
-  TORCH_CHECK(size <= max_size, "maximum size for tensor at dimension ", d,
+  auto sizes = self.sym_sizes().vec();
+  auto strides = self.sym_strides().vec();
+  auto max_size = self.dim() == 0 ? 1 : sizes[d];
+  TORCH_CHECK(max_size >= size, "maximum size for tensor at dimension ", d,
                                 " is ", max_size, " but size is ", size);
   TORCH_CHECK(step > 0, "step is ", step, " but must be > 0");
   sizes.push_back(size);
@@ -3606,7 +3606,7 @@ Tensor unfold(const Tensor& self, int64_t d, int64_t size, int64_t step) {
     sizes[d] = (sizes[d] - size) / step + 1;
     strides[d] *= step;
   }
-  return self.as_strided(sizes, strides);
+  return self.as_strided_symint(sizes, strides);
 }
 
 Tensor diag(const Tensor& self, int64_t offset) {

@@ -4593,7 +4593,7 @@
     CPU, CUDA: rsqrt_out
     MPS: rsqrt_out_mps
 
-- func: select.Dimname(Tensor(a) self, Dimname dim, int index) -> Tensor(a)
+- func: select.Dimname(Tensor(a) self, Dimname dim, SymInt index) -> Tensor(a)
   variants: function, method
   device_check: NoCheck
   device_guard: False
@@ -9075,7 +9075,7 @@
   variants: method
   structured_delegate: renorm.out
 
-- func: unfold(Tensor(a) self, int dimension, int size, int step) -> Tensor(a)
+- func: unfold(Tensor(a) self, int dimension, SymInt size, int step) -> Tensor(a)
   variants: method
   device_check: NoCheck
   device_guard: False
@@ -9083,7 +9083,7 @@
     CPU, CUDA, Meta: unfold
     QuantizedCPU, QuantizedCUDA: unfold
 
-- func: unfold_backward(Tensor grad_in, SymInt[] input_sizes, int dim, int size, int step) -> Tensor
+- func: unfold_backward(Tensor grad_in, SymInt[] input_sizes, int dim, SymInt size, int step) -> Tensor
   variants: function
   dispatch:
     CPU, CUDA: unfold_backward
@@ -13044,7 +13044,7 @@
     CompositeExplicitAutogradNonFunctional: view_copy_dtype
   tags: view_copy
 
-- func: unfold_copy(Tensor self, int dimension, int size, int step) -> Tensor
+- func: unfold_copy(Tensor self, int dimension, SymInt size, int step) -> Tensor
   variants: function
   dispatch:
     CompositeExplicitAutogradNonFunctional: unfold_copy
@@ -13242,7 +13242,7 @@
     CompositeExplicitAutograd: view_copy_dtype_out
 
 
-- func: unfold_copy.out(Tensor self, int dimension, int size, int step, *, Tensor(a!) out) -> Tensor(a!)
+- func: unfold_copy.out(Tensor self, int dimension, SymInt size, int step, *, Tensor(a!) out) -> Tensor(a!)
   variants: function
   dispatch:
     CompositeExplicitAutograd: unfold_copy_out
