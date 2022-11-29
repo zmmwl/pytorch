@@ -12,6 +12,11 @@ __all__ = [
     "nested_tensor",
 ]
 
+def _set_module_and_doc_str(fn, doc_str):
+    fn_ = _add_docstr(fn, doc_str)
+    fn_.__module__ = 'torch.nested'
+    return fn
+
 # Nested Tensor constructor functions
 
 
@@ -61,9 +66,8 @@ def as_nested_tensor(
 # Note: This not only adds doc strings for the nested ops, but
 # also connects the torch.nested Python namespace to the torch._C._nested builtins.
 
-to_padded_tensor = _add_docstr(
-    _nested.nested_to_padded_tensor,
-    r"""
+to_padded_tensor = _set_module_and_doc_str(_nested.nested_to_padded_tensor,
+                                           r"""
 to_padded_tensor(input, padding, output_size=None, out=None) -> Tensor
 
 Returns a new (non-nested) Tensor by padding the :attr:`input` nested tensor.

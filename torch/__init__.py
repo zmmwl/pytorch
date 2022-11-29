@@ -1143,3 +1143,9 @@ if 'TORCH_CUDA_SANITIZER' in os.environ:
 
 # Populate magic methods on SymInt and SymFloat
 import torch.fx.experimental.symbolic_shapes
+
+final_all = []
+for elem in __all__:
+    if elem[0] != '_':
+        final_all.append(elem)
+__all__ = final_all
