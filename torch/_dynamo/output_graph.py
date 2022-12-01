@@ -529,9 +529,23 @@ class OutputGraph(fx.Tracer):
             )
             _step_logger()(logging.INFO, f"calling compiler function {name}")
             compiler_fn = self.compiler_fn
+            # WrapperBackend needs real inputs, for now, to verify correctness
             if config.verify_correctness:
                 compiler_fn = WrapperBackend(compiler_fn, self.example_inputs())
-            compiled_fn = compiler_fn(gm, self.fake_example_inputs())
+
+            # We invoke the backend with real inputs if and only if
+            # we are in doing accuracy evaluation in the minifier
+            # Note: This check is the same as in `save_graph_repro`
+            is_minifier_backend = "_accuracy" in str(
+                torch._dynamo.eval_frame.innermost_fn(compiler_fn)
+            )
+            is_top_level_minifiying = (
+                config.repro_after is not None and config.repro_level == 4
+            )
+            if is_minifier_backend or is_top_level_minifiying:
+                compiled_fn = compiler_fn(gm, self.example_inputs())
+            else:
+                compiled_fn = compiler_fn(gm, self.fake_example_inputs())
             _step_logger()(logging.INFO, f"done compiler function {name}")
             assert callable(compiled_fn), "compiler_fn did not return callable"
         except Exception as e:
