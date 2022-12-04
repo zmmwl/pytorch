@@ -20,6 +20,12 @@ from torch.distributed.algorithms.join import (
 )
 
 from torch.utils._pytree import tree_flatten, tree_unflatten
+from torch.distributed.algorithms.ddp_comm_hooks.default_hooks import (
+    allreduce_hook
+)
+from torch.distributed.algorithms.ddp_comm_hooks.optimizer_overlap_hooks import (
+    _apply_optim_in_backward_hook
+)
 
 RPC_AVAILABLE = False
 if dist.is_available():
@@ -689,6 +695,45 @@ class DistributedDataParallel(Module, Joinable):
 
         if static_graph:
             self._set_static_graph()
+
+        # Check if user has used apply_optim_in_backward to overlap optimizer
+        # step + DDP backward. Current constraints:
+        # 1. Only allreduce is supported at the moment, no custom communication.
+        # 2. The reducer by default sets all grads for parameters DDP manages to
+        # None after they have been applied by the optimizer. There is no support
+        # for setting only some parameter grads to None, this must be done manually
+        # by user (and DDP_OVERLAPPED_OPTIM_SET_GRADS_TO_NONE=0 needs to be set.)
+        # If your use case requires some DDP managed parameters to run with
+        # an in-backward optimizer and some with a traditional optimizer, please
+        # ping https://github.com/pytorch/pytorch/issues/90052.
+        # self._module_parameters
+        if any(
+            hasattr(p, '_in_backward_optimizers') for p in self.module.parameters()
+        ):
+            # Remove hooks that apply_optim_in_backward had registered because
+            # DDP customizes how optimizer is overlapped with backward due to
+            # the allreduce.
+            for p in self.module.parameters():
+                for handle in getattr(p, '_optimizer_hook_handles', []):
+                    handle.remove()
+
+            self.register_comm_hook(
+                self.process_group, # wrapped hook state
+                _apply_optim_in_backward_hook(allreduce_hook),
+            )
+            # TODO (rohan-varma): this is a workaround that allows to set all
+            # DDP managed parameters gradients to None at the end of backwards.
+            # This is an experimental environment variable and we will solidify
+            # this behavior dependent on use cases.
+            if os.getenv("DDP_OVERLAPPED_OPTIM_SET_GRADS_TO_NONE", "1") != "0":
+                warnings.warn(
+                    "DDP + apply_optim_in_backward will currently set all "
+                    "parameter gradients to None. If this is not the desired "
+                    "behavior, please set env variable "
+                    "DDP_OVERLAPPED_OPTIM_SET_GRADS_TO_NONE=0, and manually set"
+                    "gradients to None/zero as desired."
+                )
+                self.reducer._set_grads_to_none()
 
     def _build_replicated_tensor_module(self):
         if self._use_replicated_tensor_module:

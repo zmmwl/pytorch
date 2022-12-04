@@ -31,6 +31,7 @@ from torch.distributed.algorithms.ddp_comm_hooks import (
     default_hooks as default,
     quantization as quantization_hooks,
 )
+from torch.distributed.optim import _apply_optimizer_in_backward
 
 from torch.distributed.distributed_c10d import (
     get_world_size,
@@ -4562,6 +4563,67 @@ class DistributedTest:
                 momentum=sgd_momentum,
                 weight_decay=sgd_weight_decay,
             )
+
+        def _test_ddp_apply_optim_in_backward(
+            self, optim_cls, optim_kwargs, register_hook=True,
+        ):
+            torch.cuda.set_device(self.rank)
+            model = nn.Sequential(
+                nn.Linear(3, 3), nn.Linear(3, 3), nn.Linear(3, 3)
+            ).cuda()
+            model_optim_in_bwd = copy.deepcopy(model)
+            model = nn.parallel.DistributedDataParallel(
+                model, device_ids=[self.rank]
+            )
+            optim = optim_cls(model.parameters(), **optim_kwargs)
+            # Note: have to apply_optimizer_in_backward before wrapping with DDP.
+            _apply_optimizer_in_backward(
+                optimizer_class=optim_cls,
+                params=model_optim_in_bwd.parameters(),
+                optimizer_kwargs=optim_kwargs,
+                register_hook=register_hook,
+            )
+            model_optim_in_bwd = nn.parallel.DistributedDataParallel(
+                model_optim_in_bwd, device_ids=[self.rank]
+            )
+
+            for p1, p2 in zip(
+                model.parameters(), model_optim_in_bwd.parameters()
+            ):
+                self.assertEqual(p1, p2, "Parameters not initially equal!")
+
+            for i in range(6):
+                inp = torch.randn(3, 3)
+                model(inp).sum().backward()
+                optim.step()
+                model_optim_in_bwd(inp).sum().backward() # runs optimizer as well
+                for p1, p2 in zip(
+                    model.parameters(), model_optim_in_bwd.parameters()
+                ):
+                    self.assertEqual(p1, p2, f"Params not equal at iteration {i}")
+                    self.assertTrue(
+                        p2.grad is None, f"Optim in backward grad is not None at {i}"
+                    )
+
+                optim.zero_grad(set_to_none=True)
+
+        @skip_if_lt_x_gpu(2)
+        def test_ddp_apply_optim_in_backward(self):
+            for optim_cls in [torch.optim.SGD, torch.optim.Adam]:
+                with self.subTest(optim_cls=optim_cls):
+                    self._test_ddp_apply_optim_in_backward(
+                        optim_cls=optim_cls, optim_kwargs={"lr": 0.03}
+                    )
+
+        @skip_if_lt_x_gpu(2)
+        def test_ddp_apply_optim_in_backward_no_register_hook(self):
+            for optim_cls in [torch.optim.SGD, torch.optim.Adam]:
+                with self.subTest(optim_cls=optim_cls):
+                    self._test_ddp_apply_optim_in_backward(
+                        optim_cls=optim_cls,
+                        optim_kwargs={"lr": 0.03},
+                        register_hook=False,
+                    )
 
         def _test_ddp_hook_parity(self, state, hook, num_validated_iters=100):
             rank = self.rank
