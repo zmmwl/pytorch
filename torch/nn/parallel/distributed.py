@@ -8,6 +8,7 @@ import itertools
 import logging
 import os
 import warnings
+import weakref
 from contextlib import contextmanager
 
 import torch
@@ -717,8 +718,9 @@ class DistributedDataParallel(Module, Joinable):
                 for handle in getattr(p, '_optimizer_hook_handles', []):
                     handle.remove()
 
+            reducer_weakref = weakref.ref(self.reducer)
             self.register_comm_hook(
-                self.process_group, # wrapped hook state
+                reducer_weakref,
                 _apply_optim_in_backward_hook(allreduce_hook),
             )
             # TODO (rohan-varma): this is a workaround that allows to set all
