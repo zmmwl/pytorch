@@ -140,6 +140,11 @@ class UserDefinedObjectVariable(UserDefinedVariable):
     def python_type(self):
         return self.value_type
 
+    def as_python_constant(self):
+        if self.value_type is types.MemberDescriptorType:
+            return super().as_python_constant()
+        return self.value
+
     @staticmethod
     @functools.lru_cache(None)
     def _supported_random_functions():

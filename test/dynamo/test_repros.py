@@ -1476,8 +1476,6 @@ class ReproTests(torch._dynamo.test_case.TestCase):
 
         fn(torch.randn(3))
 
-    # Bug with storage meta - torch.BoolStorage is becoming torch.storage._LegacyStorageMeta
-    @unittest.expectedFailure
     def test_isinstance_storage(self):
         @torch._dynamo.optimize("eager")
         def fn(x):
@@ -2127,6 +2125,59 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             for buffer_ref, buffer_test in zip(m_ref.buffers(), m_test.buffers()):
                 self.assertTrue(same(buffer_ref, buffer_test))
 
+    def test_inline_class_method(self):
+        class A(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, input):
+                return input.sum()
+
+        class B(A):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, input):
+                return A.forward(self, input)
+
+        class C(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, input):
+                if input.is_cuda:
+                    return input.sin()
+                return A.forward(self, input)
+
+        inp = torch.Tensor([3, 4, 5])
+        cnt_for_c = torch._dynamo.testing.CompileCounter()
+        cnt_for_b = torch._dynamo.testing.CompileCounter()
+
+        c = C()
+        b = B()
+
+        opt_c = torch._dynamo.optimize(cnt_for_c, nopython=True)(c)
+        opt_b = torch._dynamo.optimize(cnt_for_b, nopython=True)(b)
+
+        torch._dynamo.reset()
+        self.assertTrue(same(c(inp), opt_c(inp)))
+
+        torch._dynamo.reset()
+        self.assertTrue(same(b(inp), opt_b(inp)))
+
+        self.assertEqual(cnt_for_c.op_count, 1)
+        self.assertEqual(cnt_for_b.op_count, 1)
+
+    def test_default_generator_manual_seed(self):
+        def deterministic_torch_manual_seed(*args, **kwargs):
+            #from torch._C import default_generator
+            seed = 1337
+            torch._C.default_generator.manual_seed(seed)
+            return
+
+        opt_f = torch._dynamo.optimize("eager", nopython=True)(deterministic_torch_manual_seed)
+        # Note that we ignore the value of manual_seed in dynamo
+        self.assertEqual(opt_f(), deterministic_torch_manual_seed())
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

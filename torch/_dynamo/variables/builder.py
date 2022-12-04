@@ -422,7 +422,7 @@ class VariableBuilder:
             return SkipFilesVariable(
                 value, guards=make_guards(GuardBuilder.FUNCTION_MATCH)
             )
-        elif istype(value, (type, ABCMeta)):
+        elif istype(value, (type, ABCMeta)) and not issubclass(value, torch.nn.Module):
             # TODO(whc) the following seems preferable but breaks some tests, debug
             # elif inspect.isclass(value):
             return UserDefinedClassVariable(
@@ -792,7 +792,7 @@ def wrap_fx_proxy_cls(target_cls, tx, proxy, example_value=None, **options):
                 or hasattr(example_value, "_fields")
             ), ("namedtuple?")
             return NamedTupleVariable(unpacked, example_value.__class__, **options)
-    elif example_value is None or proxy.node.target is torch.manual_seed:
+    elif example_value is None or proxy.node.target in [torch.manual_seed, torch._C.default_generator.manual_seed]:
         return ConstantVariable(None, **options)
     elif (
         isinstance(example_value, int)
