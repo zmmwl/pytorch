@@ -1079,6 +1079,7 @@ make_fx_failures = {
     skip('nn.functional.max_unpool1d', '', device_type='cpu'),
     skip('nn.functional.max_unpool2d', '', device_type='cpu'),
     skip('nn.functional.max_unpool3d', '', device_type='cpu'),
+    xfail('nn.functional.one_hot'),
     skip('linalg.lstsq'),  # flaky, probably just a precision issue
 
     # data-dependent control flow
@@ -1342,6 +1343,14 @@ inplace_symbolic_tensor_failures = {
     # Views
     xfail('t', ''),
     xfail('transpose', ''),
+    xfail('bitwise_right_shift'),
+    xfail('bitwise_or'),
+    xfail('bitwise_not'),
+    xfail('bitwise_left_shift'),
+    xfail('bitwise_xor'),
+    xfail('bitwise_and'),
+    xfail('gcd'),
+    xfail('lcm')
 }
 
 # Copies inputs to inplace operations to avoid inplace modifications
@@ -1404,25 +1413,25 @@ def _test_make_fx_helper(self, device, dtype, op, tracing_mode, inplace=False):
         self.assertEqual(new_out, old_out)
 
 class TestProxyTensorOpInfo(TestCase):
-    @ops(op_db, allowed_dtypes=(torch.float,))
+    @ops(op_db, allowed_dtypes=(torch.float,), secondary_allowed_dtypes=(torch.long, torch.cfloat))
     @skipOps('TestProxyTensorOpInfo', 'test_make_fx_exhaustive', make_fx_failures)
     def test_make_fx_exhaustive(self, device, dtype, op):
         _test_make_fx_helper(self, device, dtype, op, "real")
 
-    @ops(op_db, allowed_dtypes=(torch.float,))
+    @ops(op_db, allowed_dtypes=(torch.float,), secondary_allowed_dtypes=(torch.long, torch.cfloat))
     @skipOps('TestProxyTensorOpInfo', 'test_make_fx_fake_exhaustive', make_fx_failures.union(fake_tensor_failures))
     def test_make_fx_fake_exhaustive(self, device, dtype, op):
         _test_make_fx_helper(self, device, dtype, op, "fake")
 
     @skipIfNoSympy
-    @ops(op_db, allowed_dtypes=(torch.float,))
+    @ops(op_db, allowed_dtypes=(torch.float,), secondary_allowed_dtypes=(torch.long, torch.cfloat))
     @skipOps('TestProxyTensorOpInfo', 'test_make_fx_symbolic_exhaustive',
              make_fx_failures | fake_tensor_failures | symbolic_tensor_failures | outplace_symbolic_tensor_failures)
     def test_make_fx_symbolic_exhaustive(self, device, dtype, op):
         _test_make_fx_helper(self, device, dtype, op, "symbolic")
 
     @skipIfNoSympy
-    @ops(op_db, allowed_dtypes=(torch.float,))
+    @ops(op_db, allowed_dtypes=(torch.float,), secondary_allowed_dtypes=(torch.long, torch.cfloat))
     @skipOps('TestProxyTensorOpInfo', 'test_make_fx_symbolic_exhaustive_inplace',
              make_fx_failures | fake_tensor_failures | symbolic_tensor_failures | inplace_symbolic_tensor_failures)
     def test_make_fx_symbolic_exhaustive_inplace(self, device, dtype, op):
