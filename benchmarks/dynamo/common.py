@@ -125,7 +125,6 @@ CI_SKIP_INDUCTOR_TRAINING = [
     "convmixer_768_32",  # accuracy - Unable to repro on A100
     "hrnet_w18",  # accuracy - Unable to repro on A100
     "sebotnet33ts_256",  # accuracy - Unable to repro on A100
-    "hrnet_w18",  # accuracy - Unable to repro on A100
     "eca_botnext26ts_256",  # accuracy - Fails on A100
     "eca_halonext26ts",  # accuracy
     "fbnetv3_b",  # accuracy
