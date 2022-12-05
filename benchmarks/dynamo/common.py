@@ -129,10 +129,7 @@ CI_SKIP_INDUCTOR_TRAINING = [
     "eca_halonext26ts",  # accuracy
     "fbnetv3_b",  # accuracy
     "levit_128",  # fp64_OOM
-    "res2net101_26w_4s",  # accuracy
     "spnasnet_100",  # accuracy
-    "resnest101e",  # accuracy
-    "swin_base_patch4_window7_224",  # accuracy
     "xcit_large_24_p8_224",  # fp64_OOM
 ]
 
