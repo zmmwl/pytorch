@@ -9,6 +9,7 @@ from traceback import FrameSummary
 from typing import cast, Dict, List, Optional
 
 import torch
+from torch.fx.experimental.guard_env import GuardEnv, guarding
 from torch.fx.graph_module import _forward_from_src as original_forward_from_src
 
 from . import config, exc
@@ -267,8 +268,6 @@ def exception_handler(e, code, frame=None):
 
 def convert_frame_assert(
     compiler_fn: CompilerFn,
-    guard_export_fn=None,
-    guard_fail_fn=None,
     one_graph: bool = True,
     export: bool = False,
 ):
@@ -392,69 +391,76 @@ def _compile(
             instructions[:] = remove_pointless_jumps(remove_dead_code(instructions))
 
     try:
-        for attempt in itertools.count():
-            try:
-                out_code = transform_code_object(code, transform)
-                orig_code_map[out_code] = code
-                break
-            except exc.RestartAnalysis:
-                log.debug("Restarting analysis ...")
-                if attempt > 100:
-                    unimplemented("100+ RestartAnalysis() calls")
-            except exc.SkipFrame:
-                log.debug(
-                    f"Skipping frame {code.co_name} \
-                    {code.co_filename} {code.co_firstlineno}"
+        guard_env = GuardEnv()
+
+        # The guard_env here is entered pretty high up, because we need it in 3 places:
+        # (1) transforms when we are making fake_tensors
+        # (2) call_user_compiler so backends can have access to it
+        # (3) Inside guards (CheckFunctionManager) when we compile the code for check_fn
+        with guarding(guard_env):
+            for attempt in itertools.count():
+                try:
+                    out_code = transform_code_object(code, transform)
+                    orig_code_map[out_code] = code
+                    break
+                except exc.RestartAnalysis:
+                    log.debug("Restarting analysis ...")
+                    if attempt > 100:
+                        unimplemented("100+ RestartAnalysis() calls")
+                except exc.SkipFrame:
+                    log.debug(
+                        f"Skipping frame {code.co_name} \
+                        {code.co_filename} {code.co_firstlineno}"
+                    )
+                    if one_graph:
+                        log.debug("No graph captured with one_graph=True")
+                    return None
+            output_codes.add(out_code)
+
+            if config.output_code:
+                log.info(
+                    format_bytecode(
+                        "ORIGINAL BYTECODE",
+                        code.co_name,
+                        code.co_filename,
+                        code.co_firstlineno,
+                        code,
+                    ),
                 )
-                if one_graph:
-                    log.debug("No graph captured with one_graph=True")
-                return None
-        output_codes.add(out_code)
+                log.info(
+                    format_bytecode(
+                        "MODIFIED BYTECODE",
+                        code.co_name,
+                        code.co_filename,
+                        code.co_firstlineno,
+                        out_code,
+                    ),
+                )
 
-        if config.output_code:
-            log.info(
-                format_bytecode(
-                    "ORIGINAL BYTECODE",
-                    code.co_name,
-                    code.co_filename,
-                    code.co_firstlineno,
-                    code,
-                ),
-            )
-            log.info(
-                format_bytecode(
-                    "MODIFIED BYTECODE",
-                    code.co_name,
-                    code.co_filename,
-                    code.co_firstlineno,
-                    out_code,
-                ),
+            assert output is not None
+            assert output.guards is not None
+            CleanupManager.instance[out_code] = output.cleanups
+            check_fn = CheckFunctionManager(
+                output,
+                output.guards,
+                locals,
+                globals,
+                hooks.guard_fail_fn if hooks else None,
             )
 
-        assert output is not None
-        assert output.guards is not None
-        CleanupManager.instance[out_code] = output.cleanups
-        check_fn = CheckFunctionManager(
-            output,
-            output.guards,
-            locals,
-            globals,
-            hooks.guard_fail_fn if hooks else None,
-        )
+            guarded_code = GuardedCode(out_code, check_fn.check_fn)
 
-        guarded_code = GuardedCode(out_code, check_fn.check_fn)
+            if config.output_code:
+                guard_str = "GUARDS:\n"
+                guard_str += "\n".join(
+                    [f" - {str(guard)}" for guard in sorted(output.guards)]
+                )
+                log.info(guard_str)
 
-        if config.output_code:
-            guard_str = "GUARDS:\n"
-            guard_str += "\n".join(
-                [f" - {str(guard)}" for guard in sorted(output.guards)]
-            )
-            log.info(guard_str)
+            if hooks.guard_export_fn is not None:
+                hooks.guard_export_fn(output.guards)
 
-        if hooks.guard_export_fn is not None:
-            hooks.guard_export_fn(output.guards)
-
-        return guarded_code
+            return guarded_code
     except (
         Unsupported,
         TorchRuntimeError,
@@ -471,6 +477,7 @@ def _compile(
 def convert_frame(compiler_fn: CompilerFn, hooks: Hooks):
     """Try to convert a frame into an FX graph, if error leave frame unmodified"""
     inner_convert = convert_frame_assert(compiler_fn, one_graph=False)
+
     def _convert_frame(frame: types.FrameType, cache_size: int, hooks: Hooks):
         counters["frames"]["total"] += 1
         try:

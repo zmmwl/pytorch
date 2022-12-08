@@ -31,6 +31,7 @@ import sympy
 import torch
 from torch import fx
 from torch._dispatch.python import enable_python_dispatcher
+
 from torch.nn.modules.lazy import LazyModuleMixin
 from torch.utils._pytree import tree_flatten, tree_map
 
@@ -759,22 +760,28 @@ def wrap_to_fake_tensor(e, fake_mode):
         return e
 
 
-def wrap_to_fake_tensor_and_record(e, tx, ignore_subclass=False):
+def wrap_to_fake_tensor_and_record(e, tx, ignore_subclass=False, name=None):
     # The not fake tensor check here is annoying - ideally, fake tensors never call this during wrapping.
     # However, get_fake_value takes args and passes them through this, which may include fake tensors.
     # see tree_map(fake_wrapper, args) in get_fake_value.
     # TODO: Check if we should remove FakeTensor isinstance check when
     # ignore_subclass
     if isinstance(e, torch.Tensor) and not isinstance(e, torch._subclasses.FakeTensor):
+
         static_shapes = config.dynamic_shapes is False
         if type(e) is torch.nn.Parameter:
             # Always static for params
             static_shapes = True
-        return wrap_fake_exception(
+        fake_tensor = wrap_fake_exception(
             lambda: make_fake_tensor(
                 e, tx.fake_mode, static_shapes, tx, ignore_subclass=ignore_subclass
             )
         )
+        if name is not None:
+            torch.fx.experimental.guard_env.CURRENT_GUARD_ENV.associate(
+                fake_tensor, name
+            )
+        return fake_tensor
     else:
         return e
 

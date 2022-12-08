@@ -605,6 +605,7 @@ class VariableBuilder:
             guards=self.make_guards(GuardBuilder.TENSOR_MATCH),
             should_specialize=self.tensor_should_specialize(),
             ignore_subclass=ignore_subclass,
+            name=self.name,
         )
 
         # TODO: I think the result is guaranteed to be fake with
@@ -665,6 +666,7 @@ class VariableBuilder:
                     tx=self.tx,
                     proxy=proxy,
                     example_value=wrapped_value,
+                    name=self.name,
                     **options,
                 )
             else:
@@ -673,6 +675,7 @@ class VariableBuilder:
                     tx=self.tx,
                     proxy=proxy,
                     example_value=wrapped_value,
+                    name=self.name,
                     **options,
                 )
             self.tx.output.unspec_variable_map[self.name] = unspec_var
@@ -705,12 +708,13 @@ def _dataclasses_fields_lambda(obj):
     return TupleVariable(items).add_options(obj)
 
 
-def wrap_fx_proxy(tx, proxy, example_value=None, **options):
+def wrap_fx_proxy(tx, proxy, example_value=None, name=None, **options):
     return wrap_fx_proxy_cls(
         target_cls=TensorVariable,
         tx=tx,
         proxy=proxy,
         example_value=example_value,
+        name=name,
         **options,
     )
 
@@ -718,7 +722,13 @@ def wrap_fx_proxy(tx, proxy, example_value=None, **options):
 # Note: Unfortunate split due to some gross classes existing that subclass TensorVariable
 # Should be compositional instead
 def wrap_fx_proxy_cls(
-    target_cls, tx, proxy, example_value=None, ignore_subclass=False, **options
+    target_cls,
+    tx,
+    proxy,
+    example_value=None,
+    ignore_subclass=False,
+    name=None,
+    **options,
 ):
     if "guards" in options and options["guards"] is not None:
         tx.output.guards.update(options["guards"])
@@ -765,7 +775,7 @@ def wrap_fx_proxy_cls(
                 # accurate TensorVariable that is able to track subclass-ness;
                 # otherwise this is wrong!
                 example_value = wrap_to_fake_tensor_and_record(
-                    example_value, tx=tx, ignore_subclass=ignore_subclass
+                    example_value, name=name, tx=tx, ignore_subclass=ignore_subclass
                 )
 
     if isinstance(example_value, torch.Tensor):

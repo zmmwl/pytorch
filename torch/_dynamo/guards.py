@@ -27,6 +27,7 @@ import numpy as np
 import sympy
 
 import torch
+from torch.fx.experimental.guard_env import DuplicateInputs, GuardEnvExpr
 from torch.fx.experimental.symbolic_shapes import FloorDiv
 
 from . import config, convert_frame, mutation_guard
@@ -43,6 +44,7 @@ from .utils import (
     tuple_iterator_getitem,
     tuple_iterator_len,
 )
+
 
 log = logging.getLogger(__name__)
 TensorGuards = torch._C._dynamo.guards.TensorGuards
@@ -674,6 +676,27 @@ class CheckFunctionManager:
         self._seen_ids.clear()
 
     """
+    The role of this function is to take a list of guards and produce a
+    string for appending to the evaluated guard code structure.
+
+    Any addition to GuardEnvExpr types must be added here, or we will raise.
+    """
+
+    def _parse_guard_env_guards(
+        self, guards: List[GuardEnvExpr]
+    ) -> Optional[List[str]]:
+        guard_strs = set()
+        for guard in guards:
+            if isinstance(guard, DuplicateInputs):
+                guard_strs.add(f"{guard.arg_a} is {guard.arg_b}")
+            else:
+                raise RuntimeError(f"Unexpected guard type {guard}")
+
+        if len(guard_strs) == 0:
+            return None
+        return guard_strs
+
+    """
     This is a complex bit of logic. The outline here is brief. For a line by line breakdown, see
     the code comments below.
 
@@ -783,6 +806,11 @@ class CheckFunctionManager:
             symbolic_shape_expression = self._parse_symbolic_shape_expressions(
                 tensor_check_names, tensor_check_ids
             )
+
+            aot_autograd_expressions = self._parse_guard_env_guards(
+                torch.fx.experimental.guard_env.CURRENT_GUARD_ENV.get_guards()
+            )
+
             tensor_check_examples = (
                 local_builder.tensor_check_examples
                 + global_builder.tensor_check_examples
@@ -797,6 +825,11 @@ class CheckFunctionManager:
                 tensor_check_names + ["tensor_check_names=tensor_check_names"]
             )
             verbose_code_parts.append(f"___check_tensors_verbose({verbose_args})")
+
+            if aot_autograd_expressions:
+                code_parts.extend(aot_autograd_expressions)
+                verbose_code_parts.extend(aot_autograd_expressions)
+
             if symbolic_shape_expression:
                 code_parts.append(symbolic_shape_expression)
                 verbose_code_parts.append(symbolic_shape_expression)

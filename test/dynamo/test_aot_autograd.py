@@ -308,7 +308,7 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
 
         def guard_fail_fn(failure):
             nonlocal failure_reason
-            failure_reason = failure[0][0]
+            failure_reason = failure[0]
 
         fxy = torch._dynamo.optimize(cc, guard_fail_fn=guard_fail_fn)(F())
         compare_equal_outs_and_grads(self, F(), fxy, (x, y))
@@ -349,7 +349,7 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
 
         def guard_fail_fn(failure):
             nonlocal failure_reason
-            failure_reason = failure[0][0]
+            failure_reason = failure[0]
 
         fxy = torch._dynamo.optimize(cc, guard_fail_fn=guard_fail_fn)(F())
         fxy(x, y)
@@ -367,12 +367,38 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
 
         fxx = torch._dynamo.optimize(cc, guard_fail_fn=guard_fail_fn)(F())
         fxx(x, x)
-        lambda: torch._C._nn.upsample_nearest2d(x, (16, 16), out=out)
-        self.assertExpectedRaisesInline(
-            AssertionError,
-            lambda: fxx(x, y),
-            """At compilation time, graph 1 was compiled under the assumption that input 1 would be a duplicate of input 0, but at runtime this was not the case.  This indicates a guard bug in AOTAutograd or Dynamo, please file a bug to PyTorch.""",
-        )
+        fxx(x, y)
+        self.assertEqual(cc.frame_count, 2)
+        self.assertEqual(failure_reason, "x is y")
+
+    @patch("torch._functorch.config.debug_assert", True)
+    def test_arg_dupe_via_dynamo_recompiles_many_args(self):
+        class F(torch.nn.Module):
+            def forward(self, a, b, c, d):
+                a.t_()
+                b.t_()
+                c.t_()
+                d.t_()
+                return (a + b + c + d,)
+
+        a = torch.randn(3, 3, requires_grad=True).clone()
+        b = torch.randn(3, 3, requires_grad=True).clone()
+
+        failure_reason = None
+
+        def guard_fail_fn(failure):
+            nonlocal failure_reason
+            failure_reason = failure[0]
+
+        self.assertTrue(failure_reason is None)
+
+        cc = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
+
+        f = torch._dynamo.optimize(cc, guard_fail_fn=guard_fail_fn)(F())
+        f(a, a, a, a)
+        f(a, b, b, b)
+        self.assertEqual(cc.frame_count, 2)
+        self.assertEqual(failure_reason, "a is b")
 
 
 if __name__ == "__main__":
