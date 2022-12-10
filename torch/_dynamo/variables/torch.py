@@ -16,6 +16,7 @@ import torch.onnx.operators
 from .. import config, variables
 from ..allowed_functions import torch_get_name
 from ..exc import unimplemented
+from ..guards import GuardBuilder
 from ..source import GetItemSource, NNModuleSource
 from ..utils import (
     check_constant_args,
@@ -310,6 +311,14 @@ class TorchVariable(VariableTracker):
         elif self.value is torch.jit.annotate:
             assert len(args) == 2
             return args[1]
+        elif self.value is torch.backends.cudnn.is_acceptable:
+            tensor_arg = args[0] if len(args) > 0 else next(iter(kwargs.items()))[1]
+            '''
+            return ConstantVariable(torch.backends.cudnn.is_acceptable(*args, **kwargs), **options).add_guard(
+                tensor_arg.make_guard(GuardBuilder.TENSOR_MATCH)
+            )
+            '''
+            return ConstantVariable(torch.backends.cudnn.is_acceptable(*args, **kwargs), **options)
         if (
             self.value.__name__ == "get_state"
             and hasattr(self.value, "__self__")
