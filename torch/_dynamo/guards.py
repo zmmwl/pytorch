@@ -15,7 +15,11 @@ import sympy
 
 import torch
 
+<<<<<<< HEAD
 from torch._guards import Guard, GuardBuilderBase, GuardSource
+=======
+from torch._guards import Guard, GuardSource
+>>>>>>> Integrate dynamo guards into torch._guards
 from torch.fx.experimental.symbolic_shapes import FloorDiv
 
 from . import config, convert_frame, mutation_guard
@@ -32,8 +36,6 @@ from .utils import (
     tuple_iterator_getitem,
     tuple_iterator_len,
 )
-
-from torch._guards import Guard, GuardSource
 
 log = logging.getLogger(__name__)
 TensorGuards = torch._C._dynamo.guards.TensorGuards

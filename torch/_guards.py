@@ -1,3 +1,8 @@
+import dataclasses
+import enum
+from contextlib import contextmanager
+from typing import Callable, List, Optional, Set
+
 """
 torch._guards is the definitional source of truth for general purpose guard structures.
 
@@ -27,7 +32,7 @@ class GuardSource(enum.Enum):
     def is_local(self):
         return self in (GuardSource.LOCAL, GuardSource.LOCAL_NN_MODULE)
 
-<<<<<<< HEAD
+
 """
 Base class for a "GuardBuilder" role.
 
@@ -42,7 +47,6 @@ There is value in keeping this GuardBuilderBase empty to keep layering clean.
 """
 class GuardBuilderBase:
     pass
-
 
 @dataclasses.dataclass
 class Guard:
@@ -154,3 +158,35 @@ class Guard:
             None,
         ), "Guarded object must be identical, or None"
         self.obj_weakref = obj_weakref
+
+
+class GuardsContext:
+    dynamo_guards: Set[Guard] = set()
+
+    def clear(self):
+        self.dynamo_guards.clear()
+
+
+_CURRENT_TRACING_CONTEXT = None
+
+class TracingContext:
+    guards_context = GuardsContext()
+
+    @staticmethod
+    def get() -> Optional["TracingContext"]:
+        return _CURRENT_TRACING_CONTEXT
+
+    def clear(self):
+        self.guards_context.clear()
+
+
+@contextmanager
+def tracing(context: TracingContext):
+    global _CURRENT_TRACING_CONTEXT
+    old_context = _CURRENT_TRACING_CONTEXT
+    _CURRENT_TRACING_CONTEXT = context
+    try:
+        yield _CURRENT_TRACING_CONTEXT
+    finally:
+        _CURRENT_TRACING_CONTEXT.clear()
+        _CURRENT_TRACING_CONTEXT = old_context
