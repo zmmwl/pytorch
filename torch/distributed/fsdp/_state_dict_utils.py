@@ -1,6 +1,6 @@
 import math
 import warnings
-from typing import Any, Callable, cast, Dict, Iterator, no_type_check, Tuple
+from typing import Any, Callable, cast, Dict, Iterator, no_type_check, Tuple, Optional
 
 import torch
 import torch.distributed as dist
@@ -16,9 +16,10 @@ from torch.distributed._shard.sharded_tensor import (
     ShardedTensor,
 )
 from torch.distributed.fsdp._common_utils import (
+    _is_composable,
     _all_handles,
     _FSDPState,
-    _has_fsdp_params,
+    _has_fsdp_params_based_on_composable,
     _module_handles,
     clean_tensor_name,
     FSDP_PREFIX,
@@ -42,6 +43,7 @@ from ._unshard_param_utils import (
     _deregister_orig_params,
     _register_orig_params,
     _unshard_params,
+    _get_module_handles_based_on_composable,
     FLAT_PARAM,
 )
 from .flat_param import FlatParamHandle
@@ -61,18 +63,20 @@ def _convert_to_wrapped_module_name(module_name: str) -> str:
 def _param_fqns(
     module: nn.Module, fsdp_state: _FSDPState
 ) -> Iterator[Tuple[str, str, str]]:
-    if not _has_fsdp_params(fsdp_state, module):
+    if not _has_fsdp_params_based_on_composable(fsdp_state, module):
         return
-    for param_name, module_name in _module_handles(fsdp_state, module)[
+    for param_name, module_name in _get_module_handles_based_on_composable(fsdp_state, module)[
         0
     ].parameter_module_names():
         module_name = _convert_to_wrapped_module_name(module_name)
         fqn = f"{module_name}{param_name}"
+        if _is_composable(fsdp_state):
+            print(f"RV: generated FQN: {fqn}")
         yield fqn, param_name, module_name
 
 
 def _shared_param_fqns(module: nn.Module, fsdp_state) -> Iterator[Tuple[str, str, str]]:
-    for param_name, module_name in _module_handles(fsdp_state, module)[
+    for param_name, module_name in _get_module_handles_based_on_composable(fsdp_state, module)[
         0
     ].shared_parameter_module_names():
         module_name = _convert_to_wrapped_module_name(module_name)
@@ -165,8 +169,17 @@ def _common_unshard_post_state_dict_hook(
     hook.
     """
     _replace_by_prefix(state_dict, prefix + f"{FSDP_PREFIX}", prefix)
+    # module_param_handles = state._comm_module_to_handles[module]
     # Return early for trivial cases
-    if not state_dict or not _has_fsdp_params(fsdp_state, module):
+    if not state_dict or (
+        # TODO: get rid of _is_composable hack. _has_fsdp_params_based_on_composable(fsdp_state, module) seems to return False
+        # for composable codepath.
+        (not _is_composable(fsdp_state) and not _has_fsdp_params_based_on_composable(fsdp_state, module))
+        or (_is_composable(fsdp_state) and not len(fsdp_state._comm_module_to_handles[module]) > 0)
+    ):
+    # if not state_dict or not _has_fsdp_params_based_on_composable(fsdp_state, module):
+        # print(" --- RETURNING EARLY ---")
+        raise ValueError(f" {dist.get_rank()} returnin early! {(not state_dict) is True} {_has_fsdp_params_based_on_composable(fsdp_state, module)}")
         _exit_unshard_params_ctx(module, fsdp_state)
         return state_dict
 
@@ -198,7 +211,8 @@ def _common_unshard_post_state_dict_hook(
     # Loop only the parameters saved in this instance's wrapped module to
     # avoid processing buffers.
     for fqn, param_name, module_name in _param_fqns(module, fsdp_state):
-        fqn = f"{prefix}{fqn}"
+        # TODO: not sure why this is different for composable path.
+        fqn = f"{prefix}{fqn}" if not _is_composable(fsdp_state) else f"{fqn}"
         if no_fsdp_return:
             state_dict.pop(fqn)
             continue
@@ -304,6 +318,7 @@ def _full_post_state_dict_hook(
         ):
             try:
                 state_dict[fqn] = state_dict[fqn].clone().detach()
+                print(f"RV: cloned {fqn} composable: {_is_composable(fsdp_state)}")
                 state_dict[fqn]._has_been_cloned = True  # type: ignore[attr-defined]
             except BaseException as e:
                 warnings.warn(
@@ -313,6 +328,8 @@ def _full_post_state_dict_hook(
                     "parameter is managed by FSDP. Please check clone "
                     f"implementation of {fqn}. Error: {str(e)}"
                 )
+        else:
+            print(f"RV: not cloning")
 
     return _common_unshard_post_state_dict_hook(
         module, fsdp_state, state_dict, prefix, param_hook
@@ -348,8 +365,8 @@ def _local_pre_state_dict_hook(
     `_local_post_state_dict_hook()` to simulate the case.
     """
     if (
-        _has_fsdp_params(fsdp_state, module)
-        and not _module_handles(fsdp_state, module)[0].uses_sharded_strategy
+        _has_fsdp_params_based_on_composable(fsdp_state, module)
+        and not _get_module_handles_based_on_composable(fsdp_state, module)[0].uses_sharded_strategy
     ):
         raise RuntimeError(
             "``local_state_dict`` can only be used when parameters are flatten "
@@ -372,15 +389,15 @@ def _local_post_state_dict_hook(
     """
 
     _replace_by_prefix(state_dict, f"{prefix}{FSDP_PREFIX}", prefix)
-    if not _has_fsdp_params(fsdp_state, module):
+    if not _has_fsdp_params_based_on_composable(fsdp_state, module):
         return state_dict
 
     # state_dict[f"{prefix}{FLAT_PARAM}"] exists and has the same tensor
     # value as the flat_param but it is a pure Tensor because
     # nn.Module.state_dict() will detach the parameter. Therefore, we need
     # to get flat_param to get the metadata.
-    assert _module_handles(fsdp_state, module), "Should have returned early"
-    flat_param = _module_handles(fsdp_state, module)[0].flat_param
+    assert _get_module_handles_based_on_composable(fsdp_state, module), "Should have returned early"
+    flat_param = _get_module_handles_based_on_composable(fsdp_state, module)[0].flat_param
     # Construct a ShardedTensor from the flat_param.
     full_numel = flat_param._unpadded_unsharded_size.numel()  # type: ignore[attr-defined]
     shard_offset = flat_param.numel() * fsdp_state.rank
@@ -420,7 +437,7 @@ def _local_pre_load_state_dict_hook(
     _replace_by_prefix(state_dict, prefix, f"{prefix}{FSDP_PREFIX}")
     fqn = f"{prefix}{FSDP_PREFIX}{FLAT_PARAM}"
     if fqn not in state_dict:
-        assert not _has_fsdp_params(fsdp_state, module), (
+        assert not _has_fsdp_params_based_on_composable(fsdp_state, module), (
             "No `FlatParameter` in `state_dict` for this FSDP instance "
             "but it has parameters"
         )
@@ -437,7 +454,7 @@ def _local_pre_load_state_dict_hook(
 
     # Get the metadata of the flat_param to decide whether to pad the loaded
     # tensor.
-    flat_param = _module_handles(fsdp_state, module)[0].flat_param
+    flat_param = _get_module_handles_based_on_composable(fsdp_state, module)[0].flat_param
     assert flat_param is not None
     if flat_param._shard_numel_padded not in (0, flat_param.numel()):
         assert load_tensor.numel() < flat_param.numel(), (
@@ -459,8 +476,8 @@ def _sharded_pre_state_dict_hook(
     ``_full_pre_load_state_dict_hook`` for the detail.
     """
     if (
-        _has_fsdp_params(fsdp_state, module)
-        and not _module_handles(fsdp_state, module)[0].uses_sharded_strategy
+        _has_fsdp_params_based_on_composable(fsdp_state, module)
+        and not _get_module_handles_based_on_composable(fsdp_state, module)[0].uses_sharded_strategy
     ):
         raise RuntimeError(
             "``sharded_state_dict`` can only be used when parameters are flatten "
@@ -528,10 +545,10 @@ def _sharded_pre_load_state_dict_hook(
     """
     _lazy_init(fsdp_state, module)
     _replace_by_prefix(state_dict, prefix, prefix + f"{FSDP_PREFIX}")
-    if not _has_fsdp_params(fsdp_state, module):
+    if not _has_fsdp_params_based_on_composable(fsdp_state, module):
         return
 
-    if not _module_handles(fsdp_state, module)[0].uses_sharded_strategy:
+    if not _get_module_handles_based_on_composable(fsdp_state, module)[0].uses_sharded_strategy:
         raise RuntimeError(
             "load_sharded_state_dict can only be called when parameters "
             "are flatten and sharded."
@@ -576,7 +593,7 @@ def _sharded_pre_load_state_dict_hook(
         nonsharded_tensors.append(tensor)
 
     # Create a new flat_param from the loaded, non-sharded tensors.
-    flat_param = _module_handles(fsdp_state, module)[0].flat_param
+    flat_param = _get_module_handles_based_on_composable(fsdp_state, module)[0].flat_param
     loaded_flat_param = FlatParamHandle.flatten_params(
         nonsharded_tensors, requires_grad=False
     )
@@ -609,6 +626,7 @@ def _sharded_pre_load_state_dict_hook(
 @no_type_check
 @torch.no_grad()
 def _post_state_dict_hook(
+    fsdp_state: Optional[_FSDPState],
     module: nn.Module,
     state_dict: Dict[str, Any],
     prefix: str,
@@ -620,7 +638,6 @@ def _post_state_dict_hook(
     what postprocessing will be done.
     """
     # TODO: get the composable state from module
-    fsdp_state: _FSDPState = module
     _post_state_dict_hook_fn = {
         StateDictType.FULL_STATE_DICT: _full_post_state_dict_hook,
         StateDictType.LOCAL_STATE_DICT: _local_post_state_dict_hook,
@@ -634,6 +651,7 @@ def _post_state_dict_hook(
 @no_type_check
 @torch.no_grad()
 def _pre_state_dict_hook(
+    fsdp_state: Optional[_FSDPState],
     module: nn.Module,
     *args,
     **kwargs,
@@ -643,7 +661,6 @@ def _pre_state_dict_hook(
     FSDP module is executed. ``fsdp_state._state_dict_type`` is used to decide
     what postprocessing will be done.
     """
-    fsdp_state: _FSDPState = module
     _pre_state_dict_hook_fn = {
         StateDictType.FULL_STATE_DICT: _full_pre_state_dict_hook,
         StateDictType.LOCAL_STATE_DICT: _local_pre_state_dict_hook,
@@ -656,6 +673,7 @@ def _pre_state_dict_hook(
 @no_type_check
 @torch.no_grad()
 def _pre_load_state_dict_hook(
+    fsdp_state: Optional[_FSDPState],
     module: nn.Module,
     state_dict: Dict[str, Any],
     prefix: str,
@@ -666,8 +684,6 @@ def _pre_load_state_dict_hook(
     is called. ``fsdp_state._state_dict_type`` is used to decide what preprocessing
     will be done.
     """
-    # TODO: get the composable state from module
-    fsdp_state: _FSDPState = module
     _pre_load_state_dict_hook_fn = {
         StateDictType.FULL_STATE_DICT: _full_pre_load_state_dict_hook,
         StateDictType.LOCAL_STATE_DICT: _local_pre_load_state_dict_hook,
@@ -684,9 +700,7 @@ def _pre_load_state_dict_hook(
 
 @no_type_check
 @torch.no_grad()
-def _post_load_state_dict_hook(module: nn.Module, *args: Any) -> None:
-    # TODO: get the composable state from module
-    fsdp_state: _FSDPState = module
+def _post_load_state_dict_hook(fsdp_state: Optional[_FSDPState], module: nn.Module, *args: Any) -> None:
     _post_load_state_dict_hook_fn = {
         StateDictType.FULL_STATE_DICT: _full_post_load_state_dict_hook,
         StateDictType.LOCAL_STATE_DICT: _local_post_load_state_dict_hook,
