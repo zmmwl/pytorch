@@ -1248,10 +1248,21 @@ class FlatParamHandle:
         if self._use_orig_params:
             self._use_sharded_views()
             # For the post-forward reshard, we may try to use sharded gradient
-            # views, but for the post-backward reshard, we delay the call to
-            # after the reduce-scatter
+            # views (or unsharded gradient views if a gradient was accumulated
+            # in `no_sync()`), but for the post-backward reshard, we delay the
+            # call to after the reduce-scatter.
             if self._training_state == HandleTrainingState.FORWARD:
-                self._use_sharded_grad_views()
+                # TODO: Change `_unpadded_unsharded_size` if we change the
+                # gradient to be computed directly with padding.
+                accumulated_grad_in_no_sync = (
+                    flat_param.grad is not None
+                    and self.uses_sharded_strategy
+                    and flat_param.grad.shape == flat_param._unpadded_unsharded_size
+                )
+                if accumulated_grad_in_no_sync:
+                    self._use_unsharded_grad_views()
+                else:
+                    self._use_sharded_grad_views()
 
     #########
     # VIEWS #
@@ -1405,7 +1416,16 @@ class FlatParamHandle:
                 f"{self.flat_param._fqns[i]} is missing",
             )
             param = getattr(module, param_name)
-            param.grad = view
+            if param.shape != view.shape:
+                # NOTE: This is a hack using `.data` to side step the
+                # check that parameter/gradient sizes match. Here,
+                # `param` has the sharded size; `grad` has the unsharded size.
+                # This happens when running in `no_sync()`.
+                if param.grad is None:
+                    param.grad = torch.empty_like(param)
+                param.grad.data = view
+            else:
+                param.grad = view
         for i, (
             param_name,
             module,
@@ -1420,7 +1440,14 @@ class FlatParamHandle:
             )  # did not save prefixed name
             param = getattr(module, param_name)
             prim_param = getattr(prim_module, prim_param_name)
-            param.grad = prim_param.grad
+            if param.shape != prim_param.grad.shape:
+                # NOTE: This is the same hack to use `.data` to side step the
+                # size check.
+                if param.grad is None:
+                    param.grad = torch.empty_like(param)
+                param.grad.data = prim_param.grad
+            else:
+                param.grad = prim_param.grad
 
     @contextlib.contextmanager
     def unflatten_as_params(self) -> Generator:
@@ -1600,6 +1627,7 @@ class FlatParamHandle:
                 continue
             param_start, param_end = flat_param._shard_param_offsets[i - start]  # type: ignore[attr-defined]
             numel_in_shard = param_end - param_start + 1
+
             # Check for parameter writeback
             param_changed = getattr(module, param_name) is not param
             needs_param_writeback = (
@@ -1616,6 +1644,7 @@ class FlatParamHandle:
                     param, flat_param, i, expected_shape, offset, True
                 )
                 wroteback = True
+
             # Check for gradient writeback
             # NOTE: Since this method is called in the pre-unshard, which is
             # only called during computation in the pre-forward or
