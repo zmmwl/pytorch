@@ -4894,6 +4894,7 @@ class CommonTemplate:
         for name in [
             "test_as_strided",  # buffer reuse
             "test_cat",  # alias
+            "test_lowmem_dropout1",  # None as output
             "test_profiler_mark_wrapper_call",  # TODO: fallback to default wrapper for now
             "test_relu",  # multiple inputs
             "test_silu",  # single input, single output
