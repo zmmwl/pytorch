@@ -3349,6 +3349,46 @@ class Convolution(ExternKernelAlloc):
         )
 
 
+class AllReduce(ExternKernelAlloc):
+    kernel = "torch.ops.c10d.traceable_allreduce"
+    #1 constant_args show up in codegen, use those if needed
+    #2 allreduce_ can't be called from python, without fixing bindings
+    #3 try implementing traceable_allreduce and adding POD types to api for rank/size?
+    #4 think about what to do for cpu
+    #  also how to handle comm stream
+    def __init__(
+        self,
+        layout,
+        inputs,
+        constant_args=(),
+    ):
+        super().__init__(layout, inputs, constant_args)
+
+    @classmethod
+    def create(
+        cls,
+        x: "TensorBox",
+    ):
+        x = cls.realize_input(x)
+        return AllReduce(
+            layout=MutationLayout(x),
+            inputs=[x],
+        )
+
+    def get_mutation_names(self):
+        assert isinstance(self.layout, MutationLayout)
+        return (self.layout.target.get_name(),)
+
+    # def codegen(self, wrapper):
+    #     args = self.codegen_args()
+    #     # allreduce_ expects a list of tensor inputs...
+    #     args[0] = f"[{args[0]}]"
+    #     wrapper.writeline(
+    #         f"{self.get_name()}, _ = {self.kernel}({', '.join(args)})"
+    #     )
+    #     if isinstance(self.layout, Layout):
+    #         self.codegen_size_asserts(wrapper)
+
 def _prepare_convolution_fusion_create(
     cls,
     x: "TensorBox",
