@@ -3404,36 +3404,7 @@ class Convolution(ExternKernelAlloc):
         )
 
 
-# class InplaceBernoulliFallback(ExternKernel):
-
-#         (x,) = [t.codegen_reference() for t in self.inputs]
-#         wrapper.writeline(
-#             f"{self.kernel}({x}, {', '.join(map(repr, self.constant_args))})"
-#         )
-
-#     def should_allocate(self):
-#         return False
-
-#     def get_mutation_names(self):
-#         assert isinstance(self.layout, MutationLayout)
-#         return (self.layout.target.get_name(),)
-
-#     def __init__(self, x, *constant_args):
-#         super().__init__(
-#             None,
-#             MutationLayout(x),
-#             self.unwrap_storage([x]),
-#             constant_args,
-#         )
-#         self.name = V.graph.register_buffer(self)
-
-
-class AllReduce(ExternKernelAlloc):
-    # allreduce_ can't be called from python, without fixing bindings
-    #  --> try implementing traceable_allreduce and adding POD types to api for rank/size?
-    # constant_args show up in codegen, use those if needed
-    # think about what to do for cpu
-    # also how to handle comm stream
+class Wait(ExternKernelAlloc):
     def __init__(
         self,
         layout,
@@ -3442,15 +3413,45 @@ class AllReduce(ExternKernelAlloc):
     ):
         super().__init__(layout, inputs, constant_args)
 
+    def codegen(self, wrapper):
+        (work,) = self.constant_args
+        (x,) = [t.codegen_reference() for t in self.inputs]
+        wrapper.writeline(f"{work}.wait()")
+        wrapper.writeline(f"{self.get_name()} = {x}")
+
+    def apply_constraint(self):
+        pass
+
+
+class AllReduce(ExternKernelAlloc):
+    def __init__(
+        self,
+        layout,
+        inputs,
+        constant_args=(),
+    ):
+        super().__init__(layout, inputs, constant_args)
+        self.work = V.graph.register_work(self)
+
     @classmethod
     def create(
         cls,
         x: "TensorBox",
     ):
         x = cls.realize_input(x)
-        return AllReduce(
+        all_reduce = AllReduce(
             layout=MutationLayout(x),
             inputs=[x],
+        )
+        realized_allreduce = cls.realize_input(all_reduce)
+        return Wait(
+            layout=FlexibleLayout(
+                device=x.get_device(),
+                dtype=x.get_dtype(),
+                size=x.data.layout.size,
+            ),
+            inputs=[realized_allreduce],
+            constant_args=(all_reduce.work,),
         )
 
     def get_mutation_names(self):
@@ -3460,11 +3461,11 @@ class AllReduce(ExternKernelAlloc):
     def codegen(self, wrapper):
         wrapper.header.writeline("import torch.distributed as dist")
         (x,) = [t.codegen_reference() for t in self.inputs]
-        wrapper.writeline(
-            f"{self.get_name()}_work = dist.all_reduce({x}, async_op=True)"
-        )
-        wrapper.writeline(f"{self.get_name()}_work.wait()")
-        wrapper.writeline(f"{self.get_name()} = {self.codegen_args()[0]}")
+        wrapper.writeline(f"{self.work} = dist.all_reduce({x}, async_op=True)")
+        wrapper.writeline(f"{self.get_name()} = {x}")
+
+    def apply_constraint(self):
+        pass
 
 
 def _prepare_convolution_fusion_create(
