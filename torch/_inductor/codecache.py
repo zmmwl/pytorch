@@ -19,6 +19,7 @@ from ctypes import cdll
 from threading import Thread
 from time import sleep, time
 from typing import Any, Callable, Dict, List
+from unittest.mock import patch
 
 import torch
 from torch.utils import cpp_extension
@@ -158,11 +159,46 @@ def is_gcc():
     return re.search(r"(gcc|g\+\+)", cpp_compiler())
 
 
+def dry_compile_so_and_load(lib_code: str, compile_fn: Callable, vec_isa):
+    _py_load_lib = """
+import torch
+from ctypes import cdll
+cdll.LoadLibrary("__lib_path__")
+"""
+
+    key, input_path = write(lib_code, "cpp", extra="")
+    from filelock import FileLock
+
+    lock_dir = get_lock_dir()
+    lock = FileLock(os.path.join(lock_dir, key + ".lock"), timeout=LOCK_TIMEOUT)
+    with lock:
+        output_path = input_path[:-3] + "so"
+        build_fn = cpp_compile_command if compile_fn is None else compile_fn
+        build_cmd = build_fn(
+            input_path, output_path, warning_all=False, vec_isa=vec_isa
+        ).split(" ")
+        try:
+            # Check build result
+            subprocess.check_output(build_cmd, stderr=subprocess.STDOUT)
+            subprocess.check_call(
+                [
+                    "python",
+                    "-c",
+                    _py_load_lib.replace("__lib_path__", output_path),
+                ],
+                stderr=subprocess.DEVNULL,
+            )
+        except Exception as e:
+            return False
+
+        return True
+
+
 class VecISA(object):
-    _bit_width: int
-    _macro: str
-    _arch_flags: str
-    _dtype_nelements: Dict[torch.dtype, int]
+    _bit_width: int = 0
+    _macro: str = ""
+    _arch_flags: str = ""
+    _dtype_nelements: Dict[torch.dtype, int] = {}
 
     # TorchInductor CPU vectorization reuses PyTorch vectorization utility functions
     # Hence, TorchInductor would depend on Sleef* to accelerate mathematical functions
@@ -210,42 +246,18 @@ cdll.LoadLibrary("__lib_path__")
         return self._arch_flags
 
     def __hash__(self) -> int:
-        return hash(str(self))
+        return hash(str(self) + self._avx_code)
 
     @functools.lru_cache(None)
     def __bool__(self):
-        key, input_path = write(VecISA._avx_code, "cpp", extra="")
-        from filelock import FileLock
-
-        lock_dir = get_lock_dir()
-        lock = FileLock(os.path.join(lock_dir, key + ".lock"), timeout=LOCK_TIMEOUT)
-        with lock:
-            output_path = input_path[:-3] + "so"
-            build_cmd = cpp_compile_command(
-                input_path, output_path, warning_all=False, vec_isa=self
-            ).split(" ")
-            try:
-                # Check build result
-                subprocess.check_output(build_cmd, stderr=subprocess.STDOUT)
-                subprocess.check_call(
-                    [
-                        "python",
-                        "-c",
-                        VecISA._avx_py_load.replace("__lib_path__", output_path),
-                    ],
-                    stderr=subprocess.DEVNULL,
-                )
-            except Exception as e:
-                return False
-
-            return True
+        return dry_compile_so_and_load(self._avx_code, cpp_compile_command, self)
 
 
 @dataclasses.dataclass
 class VecAVX512(VecISA):
     _bit_width = 512
     _macro = "CPU_CAPABILITY_AVX512"
-    _arch_flags = "-mavx512f -mavx512dq -mavx512vl -mavx512bw -mfma"
+    _arch_flags = " -mavx512f -mavx512dq -mavx512vl -mavx512bw -mfma"
     _dtype_nelements = {torch.float: 16, torch.bfloat16: 32}
 
     def __str__(self) -> str:
@@ -258,7 +270,7 @@ class VecAVX512(VecISA):
 class VecAVX2(VecISA):
     _bit_width = 256
     _macro = "CPU_CAPABILITY_AVX2"
-    _arch_flags = "-mavx2 -mfma"
+    _arch_flags = " -mavx2 -mfma"
     _dtype_nelements = {torch.float: 8, torch.bfloat16: 16}
 
     def __str__(self) -> str:
@@ -321,19 +333,86 @@ def pick_vec_isa():
 
 
 def get_shared(shared=True):
-    return "-shared -fPIC" if shared else ""
+    return " -shared -fPIC" if shared else ""
 
 
 def get_warning_all_flag(warning_all=True):
-    return "-Wall" if warning_all else ""
+    return " -Wall" if warning_all else ""
 
 
 def cpp_flags():
-    return "-std=c++17 -Wno-unused-variable"
+    return " -std=c++17 -Wno-unused-variable"
 
 
+@functools.lru_cache(None)
+def is_omp_valid():
+    def _opt_flags_getter_fn():
+        return "-fopenmp"
+
+    _omp_code = """
+#include <omp.h>
+
+#define N_ELEMENTS (32)
+float in_out_ptr0[N_ELEMENTS] = {0.0};
+
+extern "C" void __avx_chk_kernel() {
+    #pragma omp parallel num_threads(2) {
+        #pragma omp for
+        for(long i0=0; i0<N_ELEMENTS; i0+=1) {
+            in_out_ptr0[i0] = 1.0;
+        }
+}
+"""
+    with patch.object(config.cpp, "enable_kernel_profile", False):
+        _inc_link_path_getter_fn = functools.partial(
+            get_include_and_linking_paths, require_omp=True
+        )
+        _compile_fn = functools.partial(
+            cpp_compile_command,
+            inc_link_path_getter_fn=_inc_link_path_getter_fn,
+            opt_flags_getter_fn=_opt_flags_getter_fn,
+        )
+        return dry_compile_so_and_load(_omp_code, _compile_fn, invalid_vec_isa)
+
+
+@functools.lru_cache(None)
+def is_arch_native_valid():
+    def _opt_flags_getter_fn():
+        return "-march=native"
+
+    _arch_native_code = """
+#define N_ELEMENTS (32)
+float in_out_ptr0[N_ELEMENTS] = {0.0};
+
+extern "C" void __avx_chk_kernel() {
+    for(long i0=0; i0<N_ELEMENTS; i0+=1) {
+        in_out_ptr0[i0] = 1.0;
+    }
+}
+"""
+    with patch.object(config.cpp, "enable_kernel_profile", False):
+        _inc_link_path_getter_fn = functools.partial(
+            get_include_and_linking_paths, require_omp=False
+        )
+        _compile_fn = functools.partial(
+            cpp_compile_command,
+            inc_link_path_getter_fn=_inc_link_path_getter_fn,
+            opt_flags_getter_fn=_opt_flags_getter_fn,
+        )
+        return dry_compile_so_and_load(_arch_native_code, _compile_fn, invalid_vec_isa)
+
+
+@functools.lru_cache(None)
 def optimization_flags():
-    return "-march=native -O3 -ffast-math -fno-finite-math-only -fopenmp"
+    opt_flags = " -O3 -ffast-math -fno-finite-math-only"
+
+    if is_omp_enabled:
+        opt_flags += " -fopenmp"
+
+    if is_arch_native_enabled:
+        opt_flags += " -march=native"
+
+    return opt_flags
 
 
 def use_custom_generated_macros():
@@ -341,7 +420,7 @@ def use_custom_generated_macros():
 
 
 def get_include_and_linking_paths(
-    include_pytorch=False, vec_isa: VecISA = invalid_vec_isa
+    include_pytorch=False, vec_isa: VecISA = invalid_vec_isa, require_omp=True
 ):
     if sys.platform == "linux" and (
         include_pytorch
@@ -353,7 +432,7 @@ def get_include_and_linking_paths(
         # and we need a way to link to what PyTorch links.
         ipaths = cpp_extension.include_paths() + [sysconfig.get_path("include")]
         lpaths = cpp_extension.library_paths() + [sysconfig.get_config_var("LIBDIR")]
-        libs = ["c10", "torch", "torch_cpu", "torch_python", "gomp"]
+        libs = ["c10", "torch", "torch_cpu", "torch_python"]
         macros = vec_isa.build_macro()
         if macros:
             macros = f"-D{macros}"
@@ -364,8 +443,13 @@ def get_include_and_linking_paths(
         # This approach allows us to only pay for what we use.
         ipaths = cpp_extension.include_paths() + [sysconfig.get_path("include")]
         lpaths = []
-        libs = ["gomp"]
+        libs = []
         macros = ""
+
+    if require_omp:
+        libs += ["gomp"]
+        macros += " -D__OPENMP__ "
+
     ipaths = " ".join(["-I" + p for p in ipaths])
     lpaths = " ".join(["-L" + p for p in lpaths])
     libs = " ".join(["-l" + p for p in libs])
@@ -379,10 +463,10 @@ def cpp_compile_command(
     shared=True,
     include_pytorch=False,
     vec_isa: VecISA = invalid_vec_isa,
+    opt_flags_getter_fn: Callable = optimization_flags,
+    inc_link_path_getter_fn: Callable = get_include_and_linking_paths,
 ):
-    ipaths, lpaths, libs, macros = get_include_and_linking_paths(
-        include_pytorch, vec_isa
-    )
+    ipaths, lpaths, libs, macros = inc_link_path_getter_fn(include_pytorch, vec_isa)
 
     return re.sub(
         r"[ \n]+",
@@ -390,11 +474,15 @@ def cpp_compile_command(
         f"""
             {cpp_compiler()} {input} {get_shared(shared)} {get_warning_all_flag(warning_all)} {cpp_flags()}
             {ipaths} {lpaths} {libs} {macros}
-            {optimization_flags()}
+            {opt_flags_getter_fn()}
             {use_custom_generated_macros()}
             -o{output}
         """,
     ).strip()
+
+
+is_omp_enabled = is_omp_valid()
+is_arch_native_enabled = is_arch_native_valid()
 
 
 class CppCodeCache:
