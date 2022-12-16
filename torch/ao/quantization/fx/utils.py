@@ -23,7 +23,9 @@ from torch.ao.quantization.qconfig import (
     qconfig_equals,
 )
 from torch.ao.quantization.stubs import DeQuantStub
-from torch.ao.quantization.utils import activation_is_statically_quantized
+from torch.ao.quantization.utils import (
+    _activation_is_statically_quantized,
+)
 from torch.ao.quantization.quantize import is_activation_post_process
 
 from torch.fx import GraphModule, map_arg
@@ -441,7 +443,7 @@ def _is_custom_module_lstm(
     if qconfig is not None and qhandler is not None:
         assert isinstance(qhandler, torch.ao.quantization.fx.quantize_handler.QuantizeHandler)  # type: ignore[attr-defined]
         return isinstance(mod, torch.nn.LSTM) and \
-            activation_is_statically_quantized(qconfig) and \
+            _activation_is_statically_quantized(qconfig) and \
             qhandler.is_custom_module()
     else:
         return isinstance(mod, torch.ao.nn.quantizable.LSTM)
