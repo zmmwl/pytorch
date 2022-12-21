@@ -1265,6 +1265,9 @@ def _optim_state_dict(
 
     # Iterate in rank 0's flattened parameter ID order to ensure aligned
     # all-gathers across ranks
+    import logging
+    import time
+    logging.warning(f"DEBUGZ {all_optim_state_keys}")
     for optim_state_key in all_optim_state_keys:
         param_id = optim_state_key_to_param_id.get(optim_state_key, -1)
         assert param_id >= 0 or (optim_state_key.is_fsdp_managed and use_orig_params), (
@@ -1274,6 +1277,7 @@ def _optim_state_dict(
             "can return -1. Both assert conditions failed, some unexpected "
             "corner case happens."
         )
+        logging.warning(f"DEBUG0 {optim_state_key.unflat_param_names}")
         if optim_state_key.is_fsdp_managed:
             # If there are multiple unflat_param_names (not use_orig_params),
             # they share the same FSDPParamInfo. So the first unflat_param_name
@@ -1391,12 +1395,21 @@ def _gather_orig_param_state(
     state_objects = {
         state_name: value for state_name, value in sorted_items(optim_state)
     }
+    if "step" in state_objects and torch.is_tensor(state_objects["step"]):
+        state_objects["step"] = state_objects["step"].item()
+        state_objects["step_is_tensor"] = True
     object_list: List[Dict[str, Any]] = [
         {} for _ in range(cast(int, fsdp_state.world_size))
     ]
+    import logging
+    import time
+    logging.warning(f"DEBUG1 {fsdp_state.rank} {fqn} {len(object_list)} {time.time()} {state_objects} {object_list}.")
     dist.all_gather_object(object_list, state_objects)
+    logging.warning(f"DEBUG1 {fsdp_state.rank} {fqn} {len(object_list)} {time.time()}. semi-done")
     orig_state: Dict[str, Any] = {}
     for state in object_list:
+        if state.pop("step_is_tensor", False):
+            state["step"] = torch.tensor(state["step"])
         for state_name, value in state.items():
             curr_value = orig_state.get(state_name, [])
             if torch.is_tensor(value):
@@ -1428,6 +1441,7 @@ def _gather_orig_param_state(
             )
         value = value.cpu()
         orig_state[state_name] = value
+    logging.warning(f"DEBUG1 {fsdp_state.rank} {fqn} {len(object_list)} {time.time()} done.")
     return orig_state
 
 
