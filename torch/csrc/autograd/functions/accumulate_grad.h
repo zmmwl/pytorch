@@ -42,13 +42,10 @@ struct TORCH_API AccumulateGrad : public Node {
 
   variable_list apply(variable_list&& grads) override;
 
-  static at::Tensor callHooks(const Variable& variable, at::Tensor new_grad) {
-    for (auto& hook : impl::hooks(variable)) {
-      new_grad = (*hook)({new_grad})[0];
-    }
-    return new_grad;
+  std::vector<std::unique_ptr<FunctionPreHook>>& tensor_pre_hooks() noexcept
+      override {
+    return impl::hooks(variable);
   }
-
   // Given a variable with its current grad as variable_grad, accumulates
   // new_grad into variable_grad if in place accumulation is possible.
   // Otherwise, uses 'update_grad' to update the grad for the variable.
