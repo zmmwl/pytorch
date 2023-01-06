@@ -80,8 +80,6 @@ def fuse_fx(gm: torch.fx.GraphModule, example_inputs):
     # make sure the autograd is disabled.
     if torch.is_grad_enabled():
         return gm
-    if not is_cpu:
-        return gm
     gm = remove_identity(gm)
     gm = fuse_conv_bn(gm)
     # do mkldnn fusion(conv(linear)+unary(binary)
