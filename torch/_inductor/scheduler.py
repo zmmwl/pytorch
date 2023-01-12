@@ -110,6 +110,13 @@ class BaseSchedulerNode:
                 result[id(use.node)] = use
         self.users = list(result.values())
 
+    def set_last_usage(
+        self, future_used_buffers: Set[str], mutation_real_name: Dict[str, str]
+    ):
+        used_buffers = self.used_buffer_names()
+        used_buffers = {mutation_real_name.get(k, k) for k in used_buffers}
+        self.last_usage = used_buffers - future_used_buffers
+
     def get_aliases(self):
         return self.node.get_alias_names()
 
@@ -336,6 +343,19 @@ class SchedulerNode(BaseSchedulerNode):
                         ):
                             V.kernel.mutations.add(input_node.get_name())
                             V.kernel.mutations.add(self.get_name())
+
+                        # update last usage of reused node
+                        if isinstance(
+                            V.kernel, torch._inductor.codegen.triton.TritonKernel
+                        ):
+                            # From the checks above it follows that
+                            # input_node.get_name() in self.last_usage
+                            self.last_usage.remove(input_node.get_name())
+                        else:
+                            # On CPU nodes may be allocated twice (??) so the last_usage
+                            # field may already be updated
+                            self.last_usage.discard(input_node.get_name())
+
                         return
         super().allocate()
 
@@ -442,6 +462,19 @@ class FusedSchedulerNode(BaseSchedulerNode):
         return (
             f"{self.get_name()}.snodes = {pformat([x.get_name() for x in self.snodes])}"
         )
+
+    def set_last_usage(
+        self, future_used_buffers: Set[str], mutation_real_name: Dict[str, str]
+    ):
+        # Set self.last_usage using the global information
+        # This will be used for inter-kernel optimisations
+        super().set_last_usage(future_used_buffers, mutation_real_name)
+        # Set self.last_usage on the snodes
+        # This will be used for optimisations within the kernel
+        future_used_buffers = set()
+        for node in reversed(self.snodes):
+            node.set_last_usage(future_used_buffers, mutation_real_name)
+            future_used_buffers.update(node.last_usage)
 
     @cache_on_self
     def used_buffer_names(self) -> Set[str]:
@@ -986,7 +1019,7 @@ class Scheduler:
 
     def compute_last_usage(self):
         """
-        Populate node.last_usage
+        Populate node.last_usage recursively (also for the nodes within a FusedSchedulerNode)
         """
 
         future_used_buffers = set()
@@ -994,10 +1027,8 @@ class Scheduler:
             future_used_buffers.add(node_name)
 
         for node in reversed(self.nodes):
-            used_buffers = node.used_buffer_names()
-            used_buffers = {self.mutation_real_name.get(k, k) for k in used_buffers}
-            node.last_usage = used_buffers - future_used_buffers
-            future_used_buffers.update(used_buffers)
+            node.set_last_usage(future_used_buffers, self.mutation_real_name)
+            future_used_buffers.update(node.last_usage)
 
     def free_buffers(self):
         """Free any buffers that are no longer needed"""
