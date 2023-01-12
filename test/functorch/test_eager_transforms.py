@@ -24,7 +24,7 @@ from torch.testing._internal.common_device_type import instantiate_device_type_t
 from torch.testing._internal.common_dtype import get_all_fp_dtypes
 from torch._subclasses.fake_tensor import FakeTensorMode
 from functools import partial
-from functorch.experimental import replace_all_batch_norm_modules_
+from functorch.experimental import replace_all_batch_norm_modules_, modules_as_pytrees
 
 import functorch
 from functorch import (
@@ -48,6 +48,7 @@ from torch.utils._pytree import _register_pytree_node, _register_pytree_node_gra
 import numpy as np
 
 from torch.utils._pytree import tree_flatten, tree_unflatten, tree_map
+from contextlib import nullcontext
 
 USE_TORCHVISION = False
 try:
@@ -1363,14 +1364,14 @@ class TestVmapOfGrad(TestCase):
                 # TODO: Check if the rtol is a problem
                 self.assertEqual(r, e, atol=0, rtol=1e-3)
         else:
-            assert mechanism == "functional_call"
+            assert mechanism == "functional_call" or mechanism == "pytree"
             expected = {k: tuple(d[k] for d in expected) for k, v in expected[0].items()}
             expected = {k: torch.stack(shards) for k, shards in expected.items()}
             for key in result:
                 # TODO: Check if the rtol is a problem
                 self.assertEqual(result[key], expected[key], atol=0, rtol=1e-3)
 
-    @parametrize("mechanism", ["make_functional", "functional_call"])
+    @parametrize("mechanism", ["make_functional", "functional_call", "pytree"])
     def test_per_sample_grads_embeddingnet(self, device, mechanism):
         class SampleNet(nn.Module):
             def __init__(self, vocab_size: int):
@@ -1402,15 +1403,25 @@ class TestVmapOfGrad(TestCase):
         net = SampleNet(vocab_size).to(device=device)
         criterion = nn.CrossEntropyLoss()
 
-        net_func, weights = _get_weights_and_functional_call(net, mechanism)
+        if mechanism == "pytree":
+            weights = [i for i in net.parameters()]
+        else:
+            net_func, weights = _get_weights_and_functional_call(net, mechanism)
 
-        def compute_loss(weights, data, target):
-            output = net_func(weights, data)
+        # net_info is the net itself when using pytrees and just the weights when we aren't
+        def compute_loss(net_info, data, target):
+            if mechanism == "pytree":
+                output = net_info(data)
+            else:
+                output = net_func(net_info, data)
             result = criterion(output, target)
             return result
 
-        expected = [grad(compute_loss)(weights, data[i], targets[i]) for i in range(64)]
-        result = vmap(partial(grad(compute_loss), weights))(data, targets)
+        net_info = net if mechanism == "pytree" else weights
+
+        with modules_as_pytrees() if mechanism == "pytree" else nullcontext():
+            expected = [grad(compute_loss)(net_info, data[i], targets[i]) for i in range(64)]
+            result = vmap(partial(grad(compute_loss), net_info))(data, targets)
         self._compare_expected_and_result(expected, result, mechanism)
 
     def test_log_softmax(self, device):
@@ -3137,7 +3148,17 @@ class TestMakeFunctional(TestCase):
         out = functional_call(mod, d, x)
         self.assertEqual(out.grad_fn is None, detach_params)
 
-    def test_parameter_tying_grad(self):
+    def _check_tied_names_same_weight(self, tied_sets, result, expected):
+        def get_elem(dict, tied_names):
+            # used to get values when the dictionary is going to be one of a set of names (from weight tying)
+            out = tuple(dict[name] for name in tied_names if name in dict)
+            assert len(out) == 1
+            return out
+
+        for tied_names in tied_sets:
+            self.assertEqual(get_elem(result, tied_names), get_elem(expected, tied_names))
+
+    def _parameter_tying_grad_model(self, for_pytree):
         class Foo(nn.Module):
             def __init__(self):
                 super().__init__()
@@ -3154,13 +3175,22 @@ class TestMakeFunctional(TestCase):
         torch.manual_seed(0)
         mod = Foo()
         loss = mod(x).sum()
-        expected = torch.autograd.grad(loss, mod.parameters())
+        if for_pytree:
+            params = {k: v for k, v in mod.named_parameters()}
+            expected = torch.autograd.grad(loss, params.values())
+            expected = {k: v for k, v in zip(params.keys(), expected)}
+        else:
+            expected = torch.autograd.grad(loss, mod.parameters())
 
-        mod = Foo()
-        fmod, _, _ = make_functional_with_buffers(mod)
+        mod1 = Foo()
         torch.manual_seed(0)
-        mod = Foo()
-        _, params, buffers = make_functional_with_buffers(mod)
+        mod2 = Foo()
+        return mod1, mod2, x, expected
+
+    def test_parameter_tying_grad(self):
+        mod1, mod2, x, expected = self._parameter_tying_grad_model(False)
+        fmod, _, _ = make_functional_with_buffers(mod1)
+        _, params, buffers = make_functional_with_buffers(mod2)
 
         def compute_loss(params, buffers, x):
             return fmod(params, buffers, x).sum()
@@ -3168,6 +3198,17 @@ class TestMakeFunctional(TestCase):
         result = grad(compute_loss)(params, buffers, x)
 
         self.assertEqual(result, expected)
+
+    def test_parameter_tying_grad_module_as_pytree(self):
+        _, mod2, x, expected = self._parameter_tying_grad_model(True)
+
+        def compute_loss(mod, x):
+            return mod(x).sum()
+
+        with modules_as_pytrees():
+            result = grad(compute_loss)(mod2, x)
+
+        self._check_tied_names_same_weight(({'weight', 'linear.weight'}, {'bias', 'linear.bias'}), result, expected)
 
     def test_parameter_tying_ensemble(self):
         class Foo(nn.Module):
@@ -3508,7 +3549,7 @@ class TestExamplesCorrectness(TestCase):
 
         self.assertEqual(result_grads, expected_grads)
 
-    @parametrize('mechanism', ["make_functional", "functional_call"])
+    @parametrize('mechanism', ["make_functional", "functional_call", "pytree"])
     @parametrize('originally_track_running_stats', [True, False])
     def test_update_batch_norm(self, device, originally_track_running_stats, mechanism):
         dtype = torch.double
@@ -3524,29 +3565,45 @@ class TestExamplesCorrectness(TestCase):
 
         replace_all_batch_norm_modules_(net)
         transformed_net = net
-        fnet, params, buffers = _get_weights_and_functional_call_with_buffers(transformed_net, mechanism)
+        
         criterion = nn.CrossEntropyLoss()
 
-        def compute_loss(x, y, params, buffers):
-            return criterion(fnet(params, buffers, x), y)
+        if mechanism == "pytree":
+            def compute_loss(x, y, net):
+                return criterion(net(x), y)
+        else:
+            fnet, params, buffers = _get_weights_and_functional_call_with_buffers(transformed_net, mechanism)
+
+            def compute_loss(x, y, params, buffers):
+                return criterion(fnet(params, buffers, x), y)
 
         # Get some sample inputs...
         x = torch.randn(num_batches, 1, 64, 28, 28, device=device, dtype=dtype)
         y = torch.randint(0, classes, (num_batches, 1), device=device)
 
-        # compute some per sample grads with vmap + grad
-        result_grads = vmap(grad(compute_loss, argnums=2), in_dims=(0, 0, None, None))(x, y, params, buffers)
+        # compute some per sample grads with, then without vmap + grad
+        if mechanism == "pytree":
+            with modules_as_pytrees():
+                result_grads = vmap(grad(compute_loss, argnums=2), in_dims=(0, 0, None))(x, y, transformed_net)
+                out = partial(compute_loss, net=transformed_net)
+                named_params = {k: v for k, v in transformed_net.named_parameters()}
+                flat_params = named_params.values()
+        else:
+            result_grads = vmap(grad(compute_loss, argnums=2), in_dims=(0, 0, None, None))(x, y, params, buffers)
+            fnet, params, buffers = _get_weights_and_functional_call_with_buffers(transformed_net, mechanism)
+            flat_params, spec = tree_flatten(params)
+            out = partial(compute_loss, params=params, buffers=buffers)
 
-        # compute some per sample grads without vmap + grad
-        fnet, params, buffers = _get_weights_and_functional_call_with_buffers(transformed_net, mechanism)
-        flat_params, spec = tree_flatten(params)
         expected_grads = [
-            torch.autograd.grad(compute_loss(x[i], y[i], params, buffers), flat_params)
+            torch.autograd.grad(out(x[i], y[i]), flat_params)
             for i in range(num_batches)
         ]
         expected_grads = [torch.stack(shards) for shards in zip(*expected_grads)]
-        expected_grads = tree_unflatten(expected_grads, spec)
 
+        if mechanism == "pytree":
+            expected_grads = {k: v for k, v in zip(named_params.keys(), expected_grads)}
+        else:
+            expected_grads = tree_unflatten(expected_grads, spec)
         self.assertEqual(result_grads, expected_grads)
 
     @parametrize('jac', ['jacfwd', 'jacrev'])
@@ -3770,7 +3827,7 @@ class TestExamplesCorrectness(TestCase):
                             tuple(weight[1] for weight in result_weights))
 
     @unittest.skipIf(not USE_TORCHVISION, "test requires torchvision")
-    @parametrize('mechanism', ["make_functional", "functional_call"])
+    @parametrize('mechanism', ["make_functional", "functional_call", "pytree"])
     def test_resnet18_per_sample_grads(self, device, mechanism):
         import torchvision.models as models
         model = models.__dict__['resnet18'](
@@ -3778,14 +3835,22 @@ class TestExamplesCorrectness(TestCase):
         ).to(device)
         criterion = nn.CrossEntropyLoss(reduction='sum')  # avoid cross batch reductions for for loop comparison
 
-        func_model, weights = _get_weights_and_functional_call(model, mechanism)
+        if mechanism == "pytree":
+            def compute_loss(net, image, target):
+                image = image.unsqueeze(0)
+                target = target.unsqueeze(0)
+                output = net(images)
+                loss = criterion(output, targets)
+                return loss
+        else:
+            func_model, weights = _get_weights_and_functional_call(model, mechanism)
 
-        def compute_loss(weights, image, target):
-            image = image.unsqueeze(0)
-            target = target.unsqueeze(0)
-            output = func_model(weights, image)
-            loss = criterion(output, target)
-            return loss
+            def compute_loss(weights, image, target):
+                image = image.unsqueeze(0)
+                target = target.unsqueeze(0)
+                output = func_model(weights, images)
+                loss = criterion(output, targets)
+                return loss
 
         batch_size = 3
         images = torch.randn(batch_size, 3, 32, 32, device=device)
@@ -3798,6 +3863,24 @@ class TestExamplesCorrectness(TestCase):
             torch.autograd.grad(compute_loss(weights, images[i], targets[i]), flat_weights)
             for i in range(batch_size)
         ]
+
+        vmap_func = vmap(grad(compute_loss), in_dims=(None, 0, 0))
+        if mechanism == "pytree":
+            with modules_as_pytrees():
+                result_grads = vmap_func(model, images, targets)
+                names, weights = zip(*model.named_parameters())
+                expected_grads = [
+                    torch.autograd.grad(compute_loss(model, images[i], targets[i]), weights)
+                    for i in range(batch_size)
+                ]
+                result_grads = [result_grads[i] for i in names]
+        else:
+            result_grads = vmap_func(weights, images, targets)
+            flat_weights, spec = tree_flatten(weights)
+            expected_grads = [
+                torch.autograd.grad(compute_loss(weights, images[i], targets[i]), weights)
+                for i in range(batch_size)
+            ]
         expected_grads = [torch.stack(shards) for shards in zip(*expected_grads)]
         expected_grads = tree_unflatten(expected_grads, spec)
 
@@ -3893,6 +3976,48 @@ class TestExamplesCorrectness(TestCase):
         value, gw = jvp(Foo.apply, (foo, x), (Foo(seed, foo.constant), torch.zeros_like(x)))
         self.assertEqual(gw.shape, [5, 3, 5])
         self.assertEqual(gw, seed @ x)
+
+    @parametrize('transform', ['vjp', 'jvp'])
+    def test_modules_as_pytree_with(self, transform):
+        class Foo(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.x = nn.Parameter(torch.randn(3, 3))
+                self.register_buffer("y", torch.randn(3, 3))
+
+            def forward(self, input):
+                return self.x * input + self.y
+
+        # like a loss function but returns a tensor instead of a scalar so need vjp/jvp
+        def loss_ish_pytree(model, input):
+            return model(input)
+
+        model = Foo()
+        model_fn, weights, buffers = make_functional_with_buffers(model)
+
+        def loss_ish_make_functional(weights, input, buffers):
+            return model_fn(weights, buffers, input)
+
+        input = torch.randn(3, 3)
+
+        if transform == "vjp":
+            with modules_as_pytrees():
+                value_pytree, vjp_fn = vjp(loss_ish_pytree, model, input)
+                grad_pytree = vjp_fn(torch.ones_like(value_pytree))
+                value_make_functional, vjp_fn = vjp(partial(loss_ish_make_functional, buffers=buffers), weights, input)
+                grad_make_functional = vjp_fn(torch.ones_like(value_make_functional))
+
+            self.assertEqual(value_pytree, value_make_functional)
+            # x is the only differentiated value so we don't worry about ordering
+            self.assertEqual(tuple(grad_pytree[0].values()), grad_make_functional[0])
+        else:
+            assert transform == "jvp"
+            pytree_tangents = copy.deepcopy(model)
+            pytree_tangents.x = nn.Parameter(torch.ones(3, 3))
+            # there's no real way to match the structure of the input since it saves a copy of the model
+            with self.assertRaisesRegex(RuntimeError, "jvp does not support modules as inputs"):
+                jvp(loss_ish_pytree, (model, input), (pytree_tangents, torch.zeros(3, 3)))
+
 
 def normalize_devices(fx_g):
     for node in fx_g.graph.nodes:

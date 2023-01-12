@@ -36,6 +36,7 @@ from .transformer import TransformerEncoder, TransformerDecoder, \
 from .flatten import Flatten, Unflatten
 from .channelshuffle import ChannelShuffle
 
+
 __all__ = [
     'Module', 'Identity', 'Linear', 'Conv1d', 'Conv2d', 'Conv3d', 'ConvTranspose1d',
     'ConvTranspose2d', 'ConvTranspose3d', 'Threshold', 'ReLU', 'Hardtanh', 'ReLU6',

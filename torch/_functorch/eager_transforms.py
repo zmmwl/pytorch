@@ -10,6 +10,7 @@ from functools import partial, wraps
 import contextlib
 from torch.utils._pytree import tree_flatten, tree_unflatten, tree_map
 from .pytree_hacks import tree_map_, treespec_pprint
+from .modules_as_pytree import are_modules_pytrees
 import torch.autograd.forward_ad as fwAD
 
 from .vmap import vmap, doesnt_support_saved_tensors_hooks, get_chunk_sizes
@@ -34,6 +35,15 @@ from torch._functorch.utils import exposed_in
 
 argnums_t = Union[int, Tuple[int, ...]]
 
+# Hacks to override the pytree behavior so we thread through the flag of whether or not to use modules as pytrees
+def tree_flatten_maybe_with_modules(pytree, grad_fn=False):
+    support_nn_modules = are_modules_pytrees()
+    return tree_flatten(pytree, grad_fn=grad_fn, support_nn_modules=support_nn_modules)
+
+def tree_map_maybe_with_modules(fn, pytree, grad_fn=False):
+    support_nn_modules = are_modules_pytrees()
+    return tree_map(fn, pytree, grad_fn=grad_fn, support_nn_modules=support_nn_modules)
+
 
 @contextlib.contextmanager
 def enable_inplace_requires_grad(enabled=True):
@@ -52,7 +62,7 @@ def _create_differentiable(inps, level=None):
                 return x.requires_grad_()
         raise ValueError(f'Thing passed to transform API must be Tensor, '
                          f'got {type(x)}')
-    return tree_map(create_differentiable, inps, grad_fn=True)
+    return tree_map_maybe_with_modules(create_differentiable, inps, grad_fn=True)
 
 
 def _undo_create_differentiable(inps, level=None):
@@ -61,11 +71,11 @@ def _undo_create_differentiable(inps, level=None):
             return _unwrap_for_grad(x, level)
         # TODO: Remove the following hack for namedtuples
         if isinstance(x, tuple):
-            return tree_map(unwrap_tensors, tuple(x))
+            return tree_map_maybe_with_modules(unwrap_tensors, tuple(x))
 
         raise RuntimeError(f"Expected tensors, got unsupported type {type(x)}")
 
-    return tree_map(unwrap_tensors, inps)
+    return tree_map_maybe_with_modules(unwrap_tensors, inps)
 
 
 def _is_differentiable(maybe_tensor):
@@ -86,7 +96,7 @@ def _wrap_tensor_for_grad(maybe_tensor, level):
 
 
 def _wrap_all_tensors(tensor_pytree, level):
-    return tree_map(partial(_wrap_tensor_for_grad, level=level), tensor_pytree)
+    return tree_map_maybe_with_modules(partial(_wrap_tensor_for_grad, level=level), tensor_pytree)
 
 
 def _as_tuple(val):
@@ -297,9 +307,9 @@ def _vjp_with_argnums(func: Callable, *primals, argnums: Optional[argnums_t] = N
                 primals_out, aux = primals_out
                 aux = _undo_create_differentiable(aux, level)
 
-            flat_primals_out, primals_out_spec = tree_flatten(primals_out, grad_fn=True)
+            flat_primals_out, primals_out_spec = tree_flatten_maybe_with_modules(primals_out, grad_fn=True)
             assert_non_empty_tensor_output(flat_primals_out, 'vjp(f, *primals)')
-            flat_diff_primals, primals_spec = tree_flatten(diff_primals, grad_fn=True)
+            flat_diff_primals, primals_spec = tree_flatten_maybe_with_modules(diff_primals, grad_fn=True)
             results = _undo_create_differentiable(primals_out, level)
 
             for primal_out in flat_primals_out:
@@ -313,7 +323,7 @@ def _vjp_with_argnums(func: Callable, *primals, argnums: Optional[argnums_t] = N
         def wrapper(cotangents, retain_graph=True, create_graph=None):
             if create_graph is None:
                 create_graph = torch.is_grad_enabled()
-            flat_cotangents, cotangents_spec = tree_flatten(cotangents, grad_fn=True)
+            flat_cotangents, cotangents_spec = tree_flatten_maybe_with_modules(cotangents, grad_fn=True)
             if primals_out_spec != cotangents_spec:
                 raise RuntimeError(
                     f'Expected pytree structure of cotangents to be the same '
@@ -480,14 +490,14 @@ def jacrev(func: Callable, argnums: Union[int, Tuple[int]] = 0, *, has_aux=False
             output, vjp_fn = vjp_out
 
         # See NOTE: [Computing jacobian with vmap and vjp for multiple outputs]
-        flat_output, output_spec = tree_flatten(output)
+        flat_output, output_spec = tree_flatten_maybe_with_modules(output)
 
         # NB: vjp already checks that all outputs are tensors
         # Step 1: Construct grad_outputs by splitting the standard basis
         flat_output_numels = tuple(out.numel() for out in flat_output)
 
         primals = _slice_argnums(args, argnums)
-        flat_primals, primals_spec = tree_flatten(primals)
+        flat_primals, primals_spec = tree_flatten_maybe_with_modules(primals)
 
         def compute_jacobian_stacked():
             # Helper function to compute chunked Jacobian
@@ -563,7 +573,7 @@ def jacrev(func: Callable, argnums: Union[int, Tuple[int]] = 0, *, has_aux=False
                 else:  # chunk_size is None or chunk_size != 1
                     chunked_result = vmap(vjp_fn)(basis)
 
-                flat_results, _ = tree_flatten(chunked_result)
+                flat_results, _ = tree_flatten_maybe_with_modules(chunked_result)
 
                 # Short-circuit if we have a single chunk.
                 if chunk_size is None or chunk_size >= out_vec_size:
@@ -918,12 +928,18 @@ def _jvp_with_argnums(func: Callable, primals: Any, tangents: Any, argnums: Opti
     #
     # Returns the same two elements as :func:`jvp` but the returned tuple, ``jvp_out``, only has JVPs with respect to
     # the primals given by argnums
+    def check_primal_has_no_modules(flat_primals):
+        # modules don't work with jvp an in general jvp only works with groups of tensors. This gives a nice error
+        if any([isinstance(i, torch.nn.Module) for i in flat_primals]):
+            raise RuntimeError("jvp does not support modules as inputs. Please use make_functional")
+
     if not isinstance(primals, tuple):
         raise RuntimeError(
             f'{jvp_str}: Expected primals to be a tuple. '
             f'E.g. it should be valid to call f(*primals).')
     diff_args = primals if argnums is None else _slice_argnums(primals, argnums)
     flat_primals, primals_spec = tree_flatten(diff_args, grad_fn=True)
+    check_primal_has_no_modules(flat_primals)
     flat_tangents, tangents_spec = tree_flatten(tangents, grad_fn=True)
     if primals_spec != tangents_spec:
         raise RuntimeError(
@@ -1242,7 +1258,7 @@ def grad_and_value(func: Callable, argnums: argnums_t = 0, has_aux: bool = False
                                        f'{output.dim()} dims. Maybe you wanted to '
                                        'use the vjp or jacrev APIs instead?')
 
-                flat_diff_args, spec = tree_flatten(diff_args, grad_fn=True)
+                flat_diff_args, spec = tree_flatten_maybe_with_modules(diff_args, grad_fn=True)
 
                 # NB: need create_graph so that backward pass isn't run in no_grad mode
                 flat_outputs = _as_tuple(output)
