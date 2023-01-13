@@ -892,6 +892,35 @@ def forward(self, a_1):
     mul = torch.ops.aten.mul.Tensor(a_1, _local_scalar_dense);  a_1 = _local_scalar_dense = None
     return mul""")
 
+    def test_boolean_index(self):
+        def f(images, handedness):
+            right_hand_mask = handedness == 1
+            images[right_hand_mask] = images[right_hand_mask].flip(-1)
+
+        r = str(make_fx(f, tracing_mode="symbolic")(
+            torch.randint(0, 256, (512, 1, 1, 96, 96)),
+            torch.randint(0, 1, (512, 1, 1))
+        ).code).strip()
+        self.assertExpectedInline(r, """\
+def forward(self, images_1, handedness_1):
+    eq = torch.ops.aten.eq.Scalar(handedness_1, 1);  handedness_1 = None
+    index = torch.ops.aten.index.Tensor(images_1, [eq])
+    flip = torch.ops.aten.flip.default(index, [-1]);  index = None
+    index_put_ = torch.ops.aten.index_put_.default(images_1, [eq], flip);  images_1 = eq = flip = None
+    return None""")
+
+    def test_item_to_constructor(self):
+        def f(a):
+            r = a.item()
+            r.node.shape_env.expr_subs[r.node.expr].append(((r >= 0).node.expr, True))
+            return torch.empty(r)
+
+        r = str(make_fx(f, tracing_mode="symbolic")(torch.randint(5, (1,))).code).strip()
+        self.assertExpectedInline(r, """\
+def forward(self, a_1):
+    _local_scalar_dense = torch.ops.aten._local_scalar_dense.default(a_1);  a_1 = None
+    empty = torch.ops.aten.empty.memory_format([_local_scalar_dense], device = device(type='cpu'), pin_memory = False);  _local_scalar_dense = None
+    return empty""")
 
     def test_neg_shape(self):
         def f(a):
