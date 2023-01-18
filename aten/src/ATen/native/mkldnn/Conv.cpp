@@ -314,7 +314,6 @@ Tensor _mkldnn_convolution(
   } else if (!use_channels_last) {
     return mkldnn_to_dense(MKLDNNTensor(y, input_t.options()));
   } else {
-    TORCH_INTERNAL_ASSERT(y.get_desc().is_nhwc());
     return output;
   }
 }
@@ -663,7 +662,6 @@ Tensor mkldnn_convolution_backward_input(
   } else if (!is_channels_last){
     return mkldnn_to_dense(MKLDNNTensor(grad_x, grad_output.options()));
   } else {
-    TORCH_INTERNAL_ASSERT(grad_x.get_desc().is_nhwc());
     return grad_input;
   }
 }
@@ -714,8 +712,9 @@ std::tuple<Tensor, Tensor> mkldnn_convolution_backward_weights(
         mkldnn_to_dense(MKLDNNTensor(grad_w, grad_output.options())),
         bias_defined ? mkldnn_to_dense(MKLDNNTensor(grad_b, grad_output.options())) : Tensor());
   } else {
+    auto memory_format = mkldnn_convolution_memory_format(grad_output.ndimension(), is_channels_last);
     return std::make_tuple(
-        mkldnn_to_dense(MKLDNNTensor(grad_w, grad_output.options())).to(at::MemoryFormat::ChannelsLast),
+        mkldnn_to_dense(MKLDNNTensor(grad_w, grad_output.options())).to(memory_format),
         bias_defined ? mkldnn_to_dense(MKLDNNTensor(grad_b, grad_output.options())) : Tensor());
   }
 }
@@ -739,7 +738,6 @@ std::tuple<Tensor, Tensor, Tensor> mkldnn_convolution_backward(
     std::tie(grad_weight, grad_bias) = mkldnn_convolution_backward_weights(
       weight.sizes(), grad_output, input, padding, stride, dilation, groups, output_mask[2], is_channels_last);
   }
-
   return std::make_tuple(grad_input, grad_weight, grad_bias);
 }
 
@@ -833,7 +831,6 @@ Tensor mkldnn_convolution_transpose(
   } else if (!use_channels_last) {
     return mkldnn_to_dense(MKLDNNTensor(y, input.options()));
   } else {
-    TORCH_INTERNAL_ASSERT(y.get_desc().is_nhwc());
     return output;
   }
 }
@@ -876,7 +873,6 @@ Tensor mkldnn_convolution_transpose_backward_input(
   } else if (!is_channels_last){
     return mkldnn_to_dense(MKLDNNTensor(grad_x, grad_output.options()));
   } else {
-    TORCH_INTERNAL_ASSERT(grad_x.get_desc().is_nhwc());
     return grad_input;
   }
 }
@@ -926,8 +922,9 @@ std::tuple<Tensor,Tensor> mkldnn_convolution_transpose_backward_weights(
         mkldnn_to_dense(MKLDNNTensor(grad_w, grad_output.options())),
         bias_defined ? mkldnn_to_dense(MKLDNNTensor(grad_b, grad_output.options())) : Tensor());
   } else {
+    auto memory_format = mkldnn_convolution_memory_format(grad_output.ndimension(), is_channels_last);
     return std::make_tuple(
-        mkldnn_to_dense(MKLDNNTensor(grad_w, grad_output.options())).to(at::MemoryFormat::ChannelsLast),
+        mkldnn_to_dense(MKLDNNTensor(grad_w, grad_output.options())).to(memory_format),
         bias_defined ? mkldnn_to_dense(MKLDNNTensor(grad_b, grad_output.options())) : Tensor());
   }
 }
