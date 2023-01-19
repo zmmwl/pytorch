@@ -12,6 +12,7 @@ import sys
 import typing
 import unittest
 import weakref
+from contextlib import contextmanager
 from unittest.mock import patch
 
 import numpy as np
@@ -1960,6 +1961,52 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         opt_fn(torch.int, torch.IntTensor)
         opt_fn(torch.int16, torch.ShortTensor)
         opt_fn(torch.bool, torch.BoolTensor)
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
+    def test_legacy_tensor_constructor(self):
+        def fn(arr, tensor_type):
+            x = torch.Tensor(arr)
+            expected = tensor_type(arr)
+            assert x.dtype == expected.dtype
+            assert x.device.type == tensor_type.device.type
+
+        @contextmanager
+        def tensor_type_ctx(tensor_type):
+            old_tensor_type = None
+            for t in torch._tensor_classes:
+                if (
+                    t.dtype == torch.get_default_dtype()
+                    and str(t.device) == torch._C._get_default_device()
+                    and "sparse" not in str(t.layout).lower()
+                ):
+                    old_tensor_type = t
+            if old_tensor_type is None:
+                raise AssertionError(
+                    f"Could not find a non-sparse tensor with {torch.get_default_dtype()},"
+                    f"{torch._C._get_default_device()} in {torch._tensor_classes}."
+                )
+            try:
+                torch.set_default_tensor_type(tensor_type)
+                yield
+            finally:
+                torch.set_default_tensor_type(old_tensor_type)
+
+        opt_fn = torch._dynamo.optimize("eager")(fn)
+        arr = [1, 2, 3]
+
+        for tensor_type in [
+            torch.FloatTensor,
+            torch.DoubleTensor,
+            torch.HalfTensor,
+            torch.BFloat16Tensor,
+            torch.cuda.FloatTensor,
+            torch.cuda.DoubleTensor,
+            torch.cuda.HalfTensor,
+            torch.cuda.BFloat16Tensor,
+        ]:
+            with tensor_type_ctx(tensor_type):
+                fn(arr, tensor_type)
+                opt_fn(arr, tensor_type)
 
     def test_nan(self):
         def f(x, n):
