@@ -20,6 +20,7 @@ from ..source import GetItemSource, NNModuleSource
 from ..utils import (
     check_constant_args,
     check_unspec_python_args,
+    deepcopy_to_fake_tensor,
     HAS_NUMPY,
     istype,
     np,
@@ -900,6 +901,26 @@ class TorchPyOperator(VariableTracker):
             example_value = r.new_empty(
                 [get_fake_value(args[1].as_proxy().node, tx).shape[0], *r.shape]
             )
+        elif self.value.__name__ == "executorch_call_delegate":
+            # This is operator for delegation within Executorch which calls a
+            # specific function in the given lowered module with the given
+            # operators. The actual operator is defined in the Executorch codebase.
+            # This is a bad hierarchical violation since
+            # executorch_call_delegate sits at a higher level than dynamo, but
+            # there's no real solution to this issue yet.
+            lowered_module = tx.output.get_submodule(args[0].module_key)
+            func_name = args[1].value
+
+            lowered_node = make_attr(args[0].module_key)
+            p_args = (lowered_node, func_name) + tuple(
+                arg.as_proxy() for arg in args[2:]
+            )
+
+            fake_sub_args = tuple(arg.get_real_value() for arg in args[2:])
+            example_real_value = getattr(lowered_module.original_module, func_name)(
+                *fake_sub_args
+            )
+            example_value = deepcopy_to_fake_tensor(example_real_value, tx.fake_mode)
         else:
             unimplemented(f"PyOperator {self.value.__name__}")
 
