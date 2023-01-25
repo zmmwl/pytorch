@@ -11,7 +11,7 @@ from torch.testing._internal.common_utils import TestCase, run_tests, skipIfRocm
     do_test_empty_full, load_tests, TEST_NUMPY, TEST_SCIPY, IS_WINDOWS, gradcheck, coalescedonoff, \
     DeterministicGuard, first_sample, TEST_WITH_CROSSREF, TEST_WITH_ROCM, skipIfTorchDynamo, \
     parametrize, subtest, is_coalesced_indices
-from torch.testing._internal.common_cuda import TEST_CUDA 
+from torch.testing._internal.common_cuda import TEST_CUDA
 from numbers import Number
 from typing import Dict, Any
 from distutils.version import LooseVersion
