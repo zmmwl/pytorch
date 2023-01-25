@@ -157,11 +157,76 @@ class TestCollectives(torch._dynamo.test_case.TestCase):
         dist.destroy_process_group()
         super().tearDownClass()
 
-    @unittest.skip("inductor lowering isn't quite right, buffer isn't allocated")
+    """
+    async_compile.wait(globals())                                         
+    del async_compile   
+
+    def call(args):  
+        arg0_1, = args                                                            
+        args.clear()
+        with torch.cuda._DeviceGuard(0):
+            torch.cuda.set_device(0) # no-op to ensure context
+            buf0 = dist.all_reduce(arg0_1, async_op=True, group=0, op=ReduceOp.SUM)
+            buf0.wait()
+            del arg0_1
+            return (buf1, )    
+        
+    """
+    # @unittest.skip("inductor lowering isn't quite right, buffer isn't allocated")
     def test_inductor_single_op(self):
+        torch._inductor.config.debug = True
         def func(inp, *, pg_id):
             ar = torch.ops.aten.all_reduce(inp, group_id=pg_id, reduce_op="sum")
             return ar
+
+        pg = _get_default_group()
+        pg_id = _register_process_group(pg)
+        inputs = torch.ones(4, 4, device="cuda")
+
+        with enable_python_dispatcher():
+            compiled = torch.compile(func)
+            out = compiled(inputs, pg_id=pg_id)
+            correct = func(inputs, pg_id=pg_id)
+            assert same(out, correct)
+
+    """
+    currently fails with
+
+      File "/scratch/whc/work/pytorch/torch/_inductor/ir.py", line 2640, in require_stride_order
+    raise AssertionError(
+AssertionError: the MutationLayout's real layout shouldn't be FlexibleLayout
+    """
+    def test_inductor_steal_buffer(self):
+        """
+        it's ok and optimal if inductor allreduce mutates the buffer of an intermediate
+        that isn't going to be used again
+        """
+        torch._inductor.config.debug = True
+        def func(inp, *, pg_id):
+            x = inp + 1
+            ar = torch.ops.aten.all_reduce(x, group_id=pg_id, reduce_op="sum")
+            return ar
+
+        pg = _get_default_group()
+        pg_id = _register_process_group(pg)
+        inputs = torch.ones(4, 4, device="cuda")
+
+        with enable_python_dispatcher():
+            compiled = torch.compile(func)
+            out = compiled(inputs, pg_id=pg_id)
+            correct = func(inputs, pg_id=pg_id)
+            assert same(out, correct)
+
+    def test_inductor_doesnt_mutate_shared(self):
+        """
+        make sure that an intermediate that's going to be reuse isn't mutated unless copied
+        """
+        torch._inductor.config.debug = True
+        def func(inp, *, pg_id):
+            x = inp + 1
+            ar = torch.ops.aten.all_reduce(x, group_id=pg_id, reduce_op="sum")
+            y = x + 2
+            return ar, y
 
         pg = _get_default_group()
         pg_id = _register_process_group(pg)
