@@ -129,9 +129,10 @@ jobs:
           TORCH_CUDA_ARCH_LIST: ${{ inputs.cuda-arch-list }}
           DOCKER_IMAGE: ${{ steps.calculate-docker-image.outputs.docker-image }}
           XLA_CUDA: ${{ contains(inputs.build-environment, 'xla') && '0' || '' }}
-          DEBUG: ${{ inputs.build-with-debug && '1' || '0' }}
+          DEBUG_ENV_VAR: ${{ inputs.build-with-debug && '-e CMAKE_BUILD_TYPE=Debug' || '' }}
           OUR_GITHUB_JOB_ID: ${{ steps.get-job-id.outputs.job-id }}
         run: |
+          DEBUG_ENV_VAR
           # detached container should get cleaned up by teardown_ec2_linux
           container_name=$(docker run \
             -e BUILD_ENVIRONMENT \
@@ -148,7 +149,7 @@ jobs:
             -e TORCH_CUDA_ARCH_LIST \
             -e PR_LABELS \
             -e OUR_GITHUB_JOB_ID \
-            -e USE_DEBUG=$DEBUG \
+            $DEBUG_ENV_VAR \
             --env-file="/tmp/github_env_${GITHUB_RUN_ID}" \
             --security-opt seccomp=unconfined \
             --cap-add=SYS_PTRACE \
