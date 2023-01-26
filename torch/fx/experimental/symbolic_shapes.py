@@ -242,6 +242,20 @@ class SymNode:
 
 
 if HAS_SYMPY:
+    # NOTE [ SymPy eval and assumptions ]
+    # In eval, we only return values in cases where we always want to evaluate.
+    # In other cases, the result will just be FloorDiv(a, b), which needs to be
+    # evaluated later if necessary.
+    #
+    # We define is_real=True to signal that the result of the expression is a
+    # real. However, we DO NOT provide _eval_* methods to avoid being too eager.
+    # Instead, the computation is delayed until we explicitly want to evaluate.
+    # We are still able to explicitly replace sub-expressions if we know that
+    # the replacement is sound.
+    #
+    # https://peps.python.org/pep-0238/#semantics-of-floor-division
+    # https://docs.sympy.org/latest/guides/assumptions.html#implementing-assumptions-handlers
+    # https://docs.sympy.org/latest/guides/custom-functions.html#best-practices-for-eval
     class FloorDiv(sympy.Function):
         """
         We maintain this so that:
@@ -251,21 +265,66 @@ if HAS_SYMPY:
         nargs = (2,)
         precedence = 50  # precedence of mul  # noqa: F811
 
-        def _sympystr(self, printer):
-            lhs = self.args[0]
-            rhs = self.args[1]
-            lhs_str = printer.parenthesize(lhs, self.precedence)
-            rhs_str = printer.parenthesize(rhs, self.precedence)
-            return f"{lhs_str}//{rhs_str}"
+        # Default return type. For instance, this applies when both arguments
+        # are Symbols without any assumptions.
+        # See NOTE [ SymPy eval and assumptions ]
+        is_real = True
 
+        @property
+        def base(self):
+            return self.args[0]
+
+        @property
+        def divisor(self):
+            return self.args[1]
+
+        def _sympystr(self, printer):
+            base = printer.parenthesize(self.base, self.precedence)
+            divisor = printer.parenthesize(self.divisor, self.precedence)
+            return f"{base}//{divisor}"
+
+        # Automatic evaluation.
+        # See NOTE [ SymPy eval and assumptions ]
         @classmethod
         def eval(cls, base, divisor):
-            if base == 0:
-                return sympy.Integer(0)
+            def check_supported_type(x):
+                if (x.is_integer is False and x.is_real is False and x.is_complex) or x.is_Boolean:
+                    raise TypeError(
+                        f"unsupported operand type(s) for //: "
+                        f"'{type(base).__name__}' and '{type(divisor).__name__}'"
+                        f", expected integer or real")
+
+            check_supported_type(base)
+            check_supported_type(divisor)
+
+            # We don't provide the same error message as in Python because SymPy
+            # makes it difficult to check the types.
+            if divisor.is_zero:
+                raise ZeroDivisionError("division by zero")
+
+            # We don't cast the return type as in Python because SymPy makes it
+            # difficult to check the types.
+            if base.is_zero:
+                return sympy.S.Zero
+            # TODO: sympy.floor fails with inductor
+            # python benchmarks/dynamo/timm_models.py --ci --accuracy \
+            #   --timing --explain --device cuda --inductor \
+            #   --total-partitions 2 --partition-id 0 \
+            #   --output log.txt -k eca_halonext26ts
             if divisor == 1:
+                # This needs to be floor'd when base is a float. However, not
+                # special-casing here at all breaks
+                # test_make_fx_symbolic_exhaustive_nn_functional_glu_cpu_float32
+                # (TestProxyTensorOpInfoCPU)
+                # There, we expect (-s0//2)//1 to simplify to -s0//2, but we
+                # have no way of knowing whether base is an integer since we
+                # don't have an integer assumption rule defined for FloorDiv.
                 return base
             if isinstance(base, sympy.Integer) and isinstance(divisor, sympy.Integer):
                 return base // divisor
+            # TODO: sympy.floor fails with inductor
+            # if isinstance(base, (sympy.Integer, sympy.Float)) and isinstance(divisor, (sympy.Integer, sympy.Float)):
+            #     return sympy.floor(base / divisor)
             if isinstance(base, FloorDiv):
                 return FloorDiv(base.args[0], base.args[1] * divisor)
 
@@ -1011,7 +1070,9 @@ class ShapeEnv(object):
         floor_div_replace = {}
         for atom in new_expr.atoms(FloorDiv):
             floor_div_replace[atom] = sympy.floor(atom.args[0] / atom.args[1])
-        new_expr = safe_expand(new_expr.xreplace(floor_div_replace))
+        # NB: we use subs and not xreplace to simplify all FloorDiv sub-exprs,
+        # like: FloorDiv(6.28, (FloorDiv(6.28, 3.14)))
+        new_expr = safe_expand(new_expr.subs(floor_div_replace))
         if len(list(new_expr.free_symbols)) == 0:
             return new_expr
         return None
@@ -1144,7 +1205,8 @@ class ShapeEnv(object):
         """
         Given an expression, evaluates it, adding guards if necessary
         """
-        if len(expr.free_symbols) == 0:
+        # NB: FloorDiv currently needs to be evaluated in _maybe_evaluate_static
+        if not expr.has(FloorDiv) and len(expr.free_symbols) == 0:
             return expr
         expr = self.simplify(expr)
         static_expr = self._maybe_evaluate_static(expr)
