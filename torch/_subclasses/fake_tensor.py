@@ -19,10 +19,10 @@ from torch.overrides import TorchFunctionMode
 from torch.utils._mode_utils import no_dispatch
 from torch.utils._python_dispatch import TorchDispatchMode
 
-from torch.utils._pytree import PyTree, tree_flatten, tree_map, tree_map_only
+from torch.utils.pytree import PyTree, tree_flatten, tree_map, tree_map_only
 from torch.utils.weak import WeakIdRef
 
-pytree = torch.utils._pytree
+pytree = torch.utils.pytree
 T = TypeVar("T")
 TensorWeakRef = Any
 
@@ -317,26 +317,27 @@ def register_op_impl(run_impl_check: Union[Callable[[OpOverload], bool], OpOverl
     lambda func: (_is_tensor_constructor(func) or func in _like_tensor_constructors)
 )
 def constructors(fake_mode, func, *args, **kwargs):
-    assert func not in _non_kwarg_device_constructors
-    _, new_kwargs = normalize_function(
-        func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
-    )
-    if func in _like_tensor_constructors:
-        default_device = new_kwargs["input"].device
-        # TODO: file issue
-        args = (new_kwargs.pop("input"),)
-    else:
-        # cpu is default device if none is specified
-        default_device = torch.device("cpu")
-        args = ()
-    out_device = new_kwargs.pop("device", None)
-    out_device = out_device if out_device is not None else default_device
-    new_kwargs["device"] = torch.device("meta")
-    # _like constructors have fake tensor inputs (maybe this causes the non-like
-    # to fail? hmmm)
-    with in_kernel_invocation_manager(fake_mode):
-        r = func(*args, **new_kwargs)
-    return FakeTensor(fake_mode, r, out_device)
+    with counter("constructors"):
+        assert func not in _non_kwarg_device_constructors
+        _, new_kwargs = normalize_function(
+            func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
+        )
+        if func in _like_tensor_constructors:
+            default_device = new_kwargs["input"].device
+            # TODO: file issue
+            args = (new_kwargs.pop("input"),)
+        else:
+            # cpu is default device if none is specified
+            default_device = torch.device("cpu")
+            args = ()
+        out_device = new_kwargs.pop("device", None)
+        out_device = out_device if out_device is not None else default_device
+        new_kwargs["device"] = torch.device("meta")
+        # _like constructors have fake tensor inputs (maybe this causes the non-like
+        # to fail? hmmm)
+        with in_kernel_invocation_manager(fake_mode):
+            r = func(*args, **new_kwargs)
+        return FakeTensor(fake_mode, r, out_device)
 
 
 @register_op_impl(lambda func: func in (aten.to.prim_Device, aten.to.device))
@@ -732,6 +733,26 @@ class FakeTensor(torch.Tensor):
 # new allocations of Tensors which have non-meta storage so
 # memory should not significantly incraese.
 
+import time
+
+from collections import defaultdict
+import random
+from contextlib import contextmanager, nullcontext
+from functools import lru_cache
+
+op_cnt = defaultdict(lambda: [0, 0])
+
+@contextmanager
+def counter(op):
+    begin = time.time()
+    yield
+    op_cnt[op][0] += time.time() - begin
+    op_cnt[op][1] += 1
+    if random.random() < 1e-3:
+        print(sorted(op_cnt.items(), key=lambda x: x[1], reverse=True)[:10])
+        print(sum([i[0] for i in op_cnt.values()]))
+        pass
+
 
 class FakeTensorMode(TorchDispatchMode):
     def __init__(
@@ -769,7 +790,22 @@ class FakeTensorMode(TorchDispatchMode):
         self.shape_env = shape_env
 
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+        with counter(func):
+            return self.inner_dispatch(func, types, args, kwargs)
+
+    def cached_empty_strided(self, shape, stride, dtype):
+        # with no_dispatch():
+        return FakeTensor(self, torch.empty_strided(shape, stride, device='meta', dtype=dtype), device='cuda')
+
+    def inner_dispatch(self, func, types, args=(), kwargs=None):
         kwargs = kwargs if kwargs else {}
+        with no_dispatch():
+            if func in {aten.mul.Tensor, aten.add.Tensor, aten.sub.Tensor, aten.relu.default}:
+                return args[0]
+                # return FakeTensor(self, torch.empty(args[0].shape, device='meta'), device='cuda')
+
+        # if func == aten.empty_strided.default:
+        #     return self.cached_empty_strided(args[0], args[1], kwargs['dtype'])
 
         if func == torch.ops.prim.device.default:
             assert len(args) == 1 and isinstance(args[0], FakeTensor)
