@@ -1372,16 +1372,21 @@ def aot_wrapper_dedupe(
 ):
     # Get information about whether or not flat_fn mutates its arguments
     # or not
+    # This change is definitely not going to be landed;
+    # functionalizing a piece of code that takes in tensor subclasses is very broken today,
+    # so during testing I was just skipping this logic. Need to revisit.
+    SKIP_ANALYSIS = True
     try:
-        with enable_python_dispatcher():
-            fw_metadata, _out = run_functionalized_fw_and_collect_metadata(flat_fn)(
-                *flat_args
-            )
+        if not SKIP_ANALYSIS:
+            with enable_python_dispatcher():
+                fw_metadata, _out = run_functionalized_fw_and_collect_metadata(flat_fn)(
+                    *flat_args
+                )
     except RuntimeError as e:
         log.warning(
             "Failed to collect metadata on function, produced code may be suboptimal.  "
             "Known situations this can occur are inference mode only compilation involving "
-            "resize_ or prims (!schema.hasAnyAliasInfo() INTERNAL ASSERT FAILED); "
+            "resize_, tensor wrapper subclasses or prims (!schema.hasAnyAliasInfo() INTERNAL ASSERT FAILED); "
             "if your situation looks different please file a bug to PyTorch.",
             exc_info=True,
         )
@@ -1398,6 +1403,9 @@ def aot_wrapper_dedupe(
         ok = True
 
         for i, a in enumerate(flat_args):
+            if SKIP_ANALYSIS:
+                ok = False
+                break
             if a not in args_set:
                 args_set.add(a)
                 leaf_flat_args.append(a)
@@ -2409,13 +2417,23 @@ def aot_module_simplified(
         **dict(mod.named_parameters(remove_duplicate=False)),
         **dict(mod.named_buffers(remove_duplicate=False)),
     }
+    # Note: As long as our tensor subclass is pytree-able, tree_unflatten here effectively implements AOTDispatch.
+    # tree_unflatten will unwrap our tensor subclass into its constituent tensors,
+    # and later inside of functional_call(), we unflatten to recover the subclass during tracing.
     params_flat, params_spec = pytree.tree_flatten(params)
     params_flat = tuple(params_flat)
     params_len = len(params_flat)
 
-    def functional_call(*args, **kwargs):
+    args_flat, args_spec = pytree.tree_flatten(args)
+    args_flat = tuple(args_flat)
+    args_len = len(args_flat)
+
+    def functional_call(*params_and_args_flat, **kwargs):
+        params_flat, args_flat = params_and_args_flat[:params_len], params_and_args_flat[params_len:]
+        params = pytree.tree_unflatten(params_flat, params_spec)
+        args = pytree.tree_unflatten(args_flat, args_spec)
         with stateless._reparametrize_module(
-            mod, pytree.tree_unflatten(args[:params_len], params_spec)
+            mod, params
         ):
             if isinstance(mod, torch.fx.GraphModule):
                 with fx_traceback.override_stack_trace(), warnings.catch_warnings():
@@ -2423,9 +2441,9 @@ def aot_module_simplified(
                         "ignore", "Anomaly Detection has been enabled."
                     )
                     with torch.autograd.detect_anomaly(check_nan=False):
-                        out = Interpreter(mod).run(*args[params_len:], **kwargs)
+                        out = Interpreter(mod).run(*args, **kwargs)
             else:
-                out = mod(*args[params_len:], **kwargs)
+                out = mod(*args, **kwargs)
 
         if not isinstance(out, (tuple, list)):
             raise RuntimeError(
@@ -2447,13 +2465,13 @@ def aot_module_simplified(
         aot_id=next(AOT_COUNTER),
     )
 
-    full_args = []
-    full_args.extend(params_flat)
-    full_args.extend(args)
+    full_args_flat = []
+    full_args_flat.extend(params_flat)
+    full_args_flat.extend(args_flat)
 
     compiled_fn = create_aot_dispatcher_function(
         functional_call,
-        full_args,
+        full_args_flat,
         aot_config,
     )
 
@@ -2462,10 +2480,13 @@ def aot_module_simplified(
     # historically returned a function that was not the boxed calling
     # convention.  This should get fixed...
     def forward(*runtime_args):
+        args_flat, params_spec = pytree.tree_flatten(runtime_args)
         full_args = []
         full_args.extend(params_flat)
-        full_args.extend(runtime_args)
-        return compiled_fn(full_args)
+        full_args.extend(args_flat)
+        out = compiled_fn(full_args)
+        return out
+        #return compiled_fn(full_args))
 
     # Just for convenience
     forward.zero_grad = mod.zero_grad
