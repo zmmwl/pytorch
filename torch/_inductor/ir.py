@@ -3000,11 +3000,19 @@ class FallbackKernel(ExternKernelAlloc):
         return super().apply_constraint()
 
 
+# tells current node how to allocate its outputs
+# doens't do any allocations
+# would need to extend to allocate
+#  - do the alloc inside external call
+#  - or extend to support allocations
+#    MOL have list of bufs to alloc, wrapper.allocate iterate and alloc them
 @dataclasses.dataclass
 class MultiOutputLayout(IRNode):
     device: torch.device
 
 
+# fake node. unpacks the input. input to MultiOutput is a reference to
+# an element inside the MultiOutputLayout
 class MultiOutput(ExternKernel):
     def codegen(self, wrapper):
         wrapper.writeline(
@@ -4017,7 +4025,7 @@ class LoopBodyBlock:
         )
 
 
-class Wait(ExternKernelAlloc):
+class Wait(ExternKernel):
     """
     Wait should not be used by itself.  It should always be constructed in tandem
     with a collective op that produces a work to wait on.
@@ -4029,26 +4037,42 @@ class Wait(ExternKernelAlloc):
         inputs,
         constant_args=(),
     ):
-        super().__init__(layout, inputs, constant_args)
+        super().__init__(None, layout, inputs, constant_args)
+        self.name = V.graph.register_buffer(self)
+
+    def should_allocate(self):
+        return False
 
     def codegen(self, wrapper):
-        (x, work) = [t.codegen_reference() for t in self.inputs]
+        (all_reduce,) = [t.codegen_reference() for t in self.inputs]
+        work = f"{all_reduce}_work"  # hacky way to name work objs..
         wrapper.writeline(f"{work}.wait()")
-        # wrapper.writeline(f"{self.get_name()} = {x}")
 
-    def get_mutation_names(self):
-        assert isinstance(self.layout, MutationLayout)
-        return (self.layout.target.get_name(),)
+        # largely symbolic from the runtime perspective, but we must ensure from scheduler
+        # perspective that Wait's buffer is the one being consumed by consumers, to ensure
+        # wait op gets scheduled at all.  And as a side effect, wait's buffer name needs to actually
+        # point to something in the codegen output
+
+        # this 'del' is screwing up scheduler 'reuse' of this buf. which i'm not sure should even be allowed
+        # wrapper.writeline(f"{self.get_name()} = {all_reduce}; del {all_reduce}")
+        wrapper.writeline(f"{self.get_name()} = {all_reduce}")
 
 
-class AllReduce(ExternKernelAlloc):
+# should treat this as a functional op first.
+# make it alloc an output buf and call the inplace extern kernel into that buf
+# then, make scheduler try to find opportunities to inplace
+class AllReduce(ExternKernel):
     def __init__(
         self,
         layout,
         inputs,
         constant_args=(),
     ):
-        super().__init__(layout, inputs, constant_args)
+        super().__init__(None, layout, inputs, constant_args)
+        self.name = V.graph.register_buffer(self)
+
+    def should_allocate(self):
+        return True
 
     @classmethod
     def create(
@@ -4057,39 +4081,56 @@ class AllReduce(ExternKernelAlloc):
         group_id: int,
         reduce_op: str,
     ):
-        # Force input to become a materialized buffer (compile a kernel if needed)
         x = cls.realize_input(x)
+
+        # TODO
+        # need to make a fixed layout for AllReduce if it happens to be returned from the program
+        # (test_inductor_doesnt_mutate_shared)
+
+        # is there a difference between literally using x.data.layout below, vs
+        # creating a new one that has the same properties?
+        new_layout = FlexibleLayout(x.get_device(), x.get_dtype(), x.get_size())
 
         # AllReduce returns a 'work' object.  But Inductor's scheduler doesn't need to know
         # about that, and we just pretend for scheduling purposes that the work obj is a 1-elem tensor.
         # Nobody should consume the output of AllReduce except 'Wait', which we control here.
         all_reduce = AllReduce(
-            layout=FixedLayout(
-                device=x.get_device(), dtype=x.get_dtype(), size=[1], stride=[1]
-            ),
+            layout=new_layout,
             inputs=[x],
             constant_args=[group_id, reduce_op],
         )
 
         # Return a 'Wait' to the user that called 'all_reduce' in the first place.  It consumes the 'work'
         # and waits on it, also producing a buffer which is really the input buffer to AllReduce.
-
-        # Nit: currently the codegen for Wait produces an unnecessary but harmless line such as
-        #      buf4 = buf2, where buf2 was the input to AllReduce, and buf4 will be used by any consumers
-        # Update: i think 'Wait' still has a new name (E.g. buf4) but downstream ops still refer to 'buf2',
-        #      meaning I can just delete the codegen for `buf4=buf2` -- not sure i'm totally in the clear here.
         return Wait(
-            layout=MutationLayout(x),
-            inputs=[x, all_reduce],
+            layout=new_layout,
+            inputs=[all_reduce],
         )
 
     def codegen(self, wrapper):
+        # these header lines just get output once
         wrapper.header.writeline("import torch.distributed as dist")
         wrapper.header.writeline("from torch._C._distributed_c10d import ReduceOp")
-        (x,) = [t.codegen_reference() for t in self.inputs]
+
+        # extract references to our args in string form for codegen output
+        (input_name,) = [t.codegen_reference() for t in self.inputs]
+        output_name = self.get_name()
         group_id = f"{repr(self.constant_args[0])}"
         reduce_op = self.constant_args[1]
+        # TODO make this real
         c10d_op = {"sum": "ReduceOp.SUM"}
+
+        # We must copy our input buffer sometimes, but the scheduler will help us find opportunities
+        # where we can skip the copy because we can reuse the input buffer.  (This requires no other
+        # users of the input buffer)
+        sched_node = V.graph.scheduler.name_to_node[output_name]
+        input_read = next(iter(sched_node.read_writes.reads))
+        if not sched_node.can_inplace(input_read):
+            wrapper.writeline(f"{output_name}.copy_({input_name})")
+
+        # We've ensured that our output buffer is either
+        # (1) the input buffer, which we're allowed to inplace modify
+        # (2) a fresh buffer, which we've copied the input into above
         wrapper.writeline(
-            f"{self.get_name()} = dist.all_reduce({x}, async_op=True, group={group_id}, op={c10d_op[reduce_op]})"
+            f"{output_name}_work = dist.all_reduce({output_name}, async_op=True, group={group_id}, op={c10d_op[reduce_op]})"
         )
