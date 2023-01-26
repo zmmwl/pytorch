@@ -69,6 +69,10 @@ tune_layout = False
 # fuse even in cases without common reads
 aggressive_fusion = False
 
+# Allow scheduler fusions to reorder loops
+# NOTE: fusions during lowering can always reorder
+fusion_reorder_loops = True
+
 # how many nodes to allow into a single fusion
 max_fusion_size = 64
 

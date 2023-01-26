@@ -47,8 +47,13 @@ indent = functools.partial(textwrap.indent, prefix="  ")
 aten = torch.ops.aten
 
 
-def inverse_reorder(order):
+def invert_permutation(order: List[int]) -> List[int]:
     inv_order = dict(zip(order, range(len(order))))
+    return [inv_order[i] for i in range(len(order))]
+
+
+def inverse_reorder(order):
+    inv_order = invert_permutation(order)
 
     def reindex(index):
         assert len(index) == len(inv_order)
