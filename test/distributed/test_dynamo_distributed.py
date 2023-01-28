@@ -14,7 +14,6 @@ import torch.distributed as dist
 from contextlib import contextmanager
 from torch import nn
 from torch._dynamo import config
-from torch._dynamo.exc import InternalTorchDynamoError
 from torch._dynamo.utils import same
 from torch._dynamo.testing import collect_results
 from torch._inductor.utils import has_triton
@@ -453,18 +452,29 @@ class TestDistributedMultiProc(MultiProcessTestCase):
             opt_results = collect_results(opt_model, opt_outputs.logits, opt_loss, inputs_flat)
             self.assertTrue(same(correct_results, opt_results))
 
-            # TODO: Fix compilation error from gradient accumulation without
-            # `no_sync()`:
-            # RuntimeError: assigned grad has data of a different size
-            with self.assertRaises(InternalTorchDynamoError):
-                # Run a second forward to trigger error with the accumulated
-                # gradient, which has sharded size, while the `FlatParameter`
-                # has unsharded size
-                opt_outputs = opt_model(
-                    input_ids=inputs["source_ids"],
-                    attention_mask=inputs["source_mask"],
-                    labels=inputs["target_ids"],
-                )
+            # TODO: With the revert changes, we can run this without any Dynamo
+            # error now.
+            reset_rng_state()
+            correct_outputs = eager_model(
+                input_ids=inputs["source_ids"],
+                attention_mask=inputs["source_mask"],
+                labels=inputs["target_ids"],
+            )
+            correct_loss = correct_outputs["loss"]
+            correct_loss.backward()
+            reset_rng_state()
+            opt_outputs = opt_model(
+                input_ids=inputs["source_ids"],
+                attention_mask=inputs["source_mask"],
+                labels=inputs["target_ids"],
+            )
+            opt_loss = opt_outputs["loss"]
+            opt_loss.backward()
+
+            inputs_flat = [inputs[k] for k in inputs]
+            correct_results = collect_results(eager_model, correct_outputs.logits, correct_loss, inputs_flat)
+            opt_results = collect_results(opt_model, opt_outputs.logits, opt_loss, inputs_flat)
+            self.assertTrue(same(correct_results, opt_results))
 
 
 @requires_nccl()
