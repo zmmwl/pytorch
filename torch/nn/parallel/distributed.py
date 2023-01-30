@@ -63,6 +63,7 @@ def _tree_unflatten_with_rref(output, treespec, output_is_rref):
     return output
 
 
+
 def _find_tensors(obj):
     r"""
     Recursively find all tensors contained in the specified object.
@@ -1179,11 +1180,8 @@ class DistributedDataParallel(Module, Joinable):
             else:
                 self.require_forward_param_sync = False
 
-        # TODO: DDPSink is currently enabled for unused parameter detection and
-        # static graph training for first iteration.
-        if (self.find_unused_parameters and not self.static_graph) or (
-            self.static_graph and self.num_iterations == 1
-        ):
+        # TODO: DDPSink is currently enabled for unused parameter detection
+        if self.find_unused_parameters and not self.static_graph:
             state_dict = {
                 "static_graph": self.static_graph,
                 "num_iterations": self.num_iterations,

@@ -8902,7 +8902,7 @@ class DistributedTest:
             class DCModule(torch.nn.Module):
                 def __init__(self):
                     super().__init__()
-                    self.m = torch.nn.Linear(10, 10)
+                    self.m = torch.nn.Linear(10, 10, bias=False)
 
                 def forward(self, x):
                     out = self.m(x)
@@ -8921,7 +8921,7 @@ class DistributedTest:
             dist.all_gather(tensor_list=grads, tensor=ddp.module.m.weight.grad)
             g, rest = grads[0], grads[1:]
             for g_ in rest:
-                self.assertNotEqual(g, g_)
+                self.assertEqual(g, g_)
 
         @skip_if_lt_x_gpu(2)
         @sandcastle_skip_if(
@@ -8930,7 +8930,6 @@ class DistributedTest:
         )
         def test_ddp_new_tensor_in_fwd_static_graph(self):
             return self._test_ddp_new_tensor_in_fwd(static_graph=True)
-
 
         def _test_ddp_buffer_hook_allreduce(self, return_futures):
             rank = self.rank
