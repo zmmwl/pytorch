@@ -100,6 +100,30 @@ class BaseListVariable(VariableTracker):
 
         return super(BaseListVariable, self).call_method(tx, name, args, kwargs)
 
+    @staticmethod
+    def generic_list_compare(left, tx, op, right, **options):
+        assert not (
+            left.is_python_constant() and right.is_python_constant()
+        ), "Illegal generic list compare on constant lists"
+
+        # Most list-like variables implement comparison ops the same way,
+        # so they can re-use this helper.
+        # There are quirks though, like how `tuple([2]) == torch.Size([2])`,
+        # but `tuple([2]) != list([2])`
+        if len(left.items) != len(right.items):
+            return ConstantVariable(False, **options)
+        if len(left.items) == 0:
+            return ConstantVariable(True, **options)
+
+        for l_r in zip(left.items, right.items):
+            l = l_r[0]
+            r = l_r[1]
+            if type(l) != type(r):
+                return ConstantVariable(False, **options)
+            l.compare(tx, op, r, **options)
+
+        return left
+
 
 class RangeVariable(BaseListVariable):
     def __init__(self, items, **kwargs):
@@ -238,6 +262,11 @@ class ListVariable(BaseListVariable):
         else:
             return super().call_method(tx, name, args, kwargs)
 
+    def compare(self, tx, op, right, **options):
+        if not isinstance(right, ListVariable):
+            return ConstantVariable(False, **options)
+        return BaseListVariable.generic_list_compare(self, tx, op, right, **options)
+
 
 class TupleVariable(BaseListVariable):
     def python_type(self):
@@ -272,6 +301,13 @@ class TupleVariable(BaseListVariable):
                 self.items + list(args[0].unpack_var_sequence(self)), **options
             )
         return super().call_method(tx, name, args, kwargs)
+
+
+    def compare(self, tx, op, right, **options):
+        # All tuple-like python constructs can be validly compared (e.g. torch.Size vs tuple)
+        if not isinstance(right, TupleVariable):
+            return ConstantVariable(False, **options)
+        return BaseListVariable.generic_list_compare(self, tx, op, right, **options)
 
 
 class SizeVariable(TupleVariable):
@@ -485,18 +521,6 @@ class ListIteratorVariable(VariableTracker):
         # assert all(isinstance(x, VariableTracker) for x in items)
         self.items = items
         self.index = index
-
-    def next_variables(self):
-        assert self.mutable_local
-        if self.index >= len(self.items):
-            raise StopIteration()
-        return self.items[self.index].add_options(self), ListIteratorVariable(
-            self.items,
-            self.index + 1,
-            mutable_local=MutableLocal(),
-            recursively_contains=self.recursively_contains,
-            **VariableTracker.propagate([self]),
-        )
 
     def as_python_constant(self):
         if self.index > 0:
