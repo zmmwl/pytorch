@@ -14,9 +14,11 @@ namespace {
 
 using scale_t = std::vector<c10::optional<double>>;
 
-template <typename scalar_in, typename scalar_out>
-void inline nearest_channels_last_acc(scalar_in* gin, scalar_out* gout, int64_t size) {
-  using Vec = vec::Vectorized<scalar_in>;
+template <typename acc_t, typename scalar_t>
+void inline nearest_channels_last_acc(acc_t* gin, scalar_t* gout, int64_t size) {
+  TORCH_CHECK((std::is_same<acc_t, scalar_t>::value),
+              "acc data type of Upsample backward should be same as scalar_t for float or double on CPU.")
+  using Vec = vec::Vectorized<acc_t>;
   int64_t d = 0;
   for (; d < size - (size % Vec::size()); d += Vec::size()) {
     Vec gin_vec = Vec::loadu(gin + d) + Vec::loadu(gout + d);
@@ -46,9 +48,11 @@ void inline nearest_channels_last_acc(float* gin, BFloat16* gout, int64_t size) 
   }
 }
 
-template <typename scalar_in, typename scalar_out>
-void inline linear_channels_last_acc(scalar_in* gin, scalar_out* gout, scalar_in w, int64_t size) {
-  using Vec = vec::Vectorized<scalar_in>;
+template <typename acc_t, typename scalar_t>
+void inline linear_channels_last_acc(acc_t* gin, scalar_t* gout, acc_t w, int64_t size) {
+  TORCH_CHECK((std::is_same<acc_t, scalar_t>::value),
+              "acc data type of Upsample backward should be same as scalar_t for float or double on CPU.")
+  using Vec = vec::Vectorized<acc_t>;
   int64_t d = 0;
   for (; d < size - (size % Vec::size()); d += Vec::size()) {
     Vec gin_vec = Vec::loadu(gin + d) + Vec(w) * Vec::loadu(gout + d);
