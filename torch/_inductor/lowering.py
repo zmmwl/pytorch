@@ -3343,6 +3343,40 @@ def pow_native(a, b):
     return ops.pow(a, b)
 
 
+def pow_integer(a, b, a_dtype, b_dtype):
+    # This implements powi from ATen/native/Pow.h but using a fixed loop size
+    # to remove data-dependent control flow
+    max_exponent = torch.iinfo(b_dtype).max
+    num_loops = math.log2((max_exponent + 1))
+    assert int(num_loops) == num_loops
+    num_loops = int(num_loops)
+
+    ilp_factor = 2 if b_dtype != torch.int64 else 4
+    acc = [ops.constant(1, a_dtype)] * ilp_factor
+    x = a
+    b_orig = b
+    for i in range(num_loops):
+        j = i % ilp_factor
+        mask = ops.ne(ops.bitwise_and(b, f"0x{1 << i:x}"), "0")
+        acc[j] = ops.where(mask, ops.mul(acc[j], x), acc[j])
+        if i + 1 < num_loops:
+            x = ops.mul(x, x)
+
+    result = acc[0]
+    for j in range(1, ilp_factor):
+        result = ops.mul(result, acc[j])
+
+    if b_dtype == torch.uint8:
+        return result
+
+    # Fixup for negative exponents
+    neg_res = ops.where(ops.eq(a, "1"), "1", "0")
+    sign = ops.where(ops.bitwise_and(b_orig, "1"), "-1", "1")
+    neg_res = ops.where(ops.eq(a, "-1"), sign, neg_res)
+
+    return ops.where(ops.lt(b_orig, "0"), neg_res, result)
+
+
 def _is_ir_node_and_cuda(x):
     if isinstance(x, ir.IRNode) and decode_device(x.get_device()).type == "cuda":
         return True
@@ -3350,22 +3384,38 @@ def _is_ir_node_and_cuda(x):
     return False
 
 
-@register_lowering(aten.pow, broadcast=True)
+@register_lowering(
+    aten.pow,
+    broadcast=True,
+    type_promotion_kind=None,
+)
 def pow(a, b):
-    if _is_ir_node_and_cuda(a) and _is_ir_node_and_cuda(b):
-        assert a.get_dtype() in (
-            torch.float16,
-            torch.float32,
-            torch.float64,
-        ), "Pow input must be floating point."
+    # For pow_integer we want to know if the exponent is promoted from a
+    # smaller width type, since that requires fewer iterations to compute the
+    # power
+    promoted_dtype = get_promoted_dtype(
+        a,
+        b,
+        type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.BOOL_TO_LONG,
+    )
+    b_dtype = b.get_dtype() if isinstance(b, TensorBox) else promoted_dtype
+    a = to_dtype(a, promoted_dtype) if isinstance(a, TensorBox) else a
+    b = to_dtype(b, promoted_dtype) if isinstance(b, TensorBox) else b
+
+    if isinstance(a, Number):
+        if a == 1:
+            return full_like(b, 1)
+        if a == 2 and is_float_dtype(promoted_dtype):
+            return exp2(b)
+
     if isinstance(b, float) and b == int(b):
-        return pow(a, int(b))
+        b = int(b)
     elif isinstance(b, float) and b == 0.5:
         return sqrt(a)
-    elif isinstance(b, int) and b == 1:
-        return a
-    elif isinstance(b, int) and -32 < b < 32:
-        # Optimize away small fixed powers
+
+    is_integer_pow = is_integer_dtype(promoted_dtype)
+    embed_exponent = isinstance(b, int) and (-32 < b < 32 or is_integer_pow)
+    if embed_exponent:
         loader = a.make_loader()
 
         def fn(idx):
@@ -3378,11 +3428,21 @@ def pow(a, b):
             ranges=a.get_size(),
         )
 
-    if isinstance(a, Number):
-        if a == 1:
-            return full_like(b, 1)
-        if a == 2 and is_float_dtype(b.get_dtype()):
-            return exp2(b)
+    if is_integer_pow:
+        a_loader = a.make_loader()
+        b_loader = b.make_loader()
+
+        def fn(idx):
+            return pow_integer(
+                a_loader(idx), b_loader(idx), a.get_dtype(), b_dtype
+            )
+
+        return Pointwise.create(
+            device=a.get_device(),
+            dtype=a.get_dtype(),
+            inner_fn=fn,
+            ranges=a.get_size(),
+        )
 
     return pow_native(a, b)
 
