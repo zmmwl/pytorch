@@ -1604,7 +1604,7 @@ void initJITBindings(PyObject* module) {
       },
       py::arg("input"),
       py::arg("parse_tensor_constants") = false);
-  m.def("parse_schema", parseSchema);
+  m.def("parse_schema", [](const std::string& schema) {return parseSchema(schema);});
   m.def("unify_type_list", [](const std::vector<TypePtr>& types) {
     std::ostringstream s;
     auto type = unifyTypeList(types, s);
@@ -1761,6 +1761,14 @@ void initJITBindings(PyObject* module) {
           "alias_info", [](Argument& self) { return self.alias_info(); })
       .def_property_readonly(
           "is_out", [](Argument& self) { return self.is_out(); })
+      .def_property_readonly(
+          "allowed_types", [](Argument& self) {
+            py::list types;
+            for (const auto& type : self.allowed_types()) {
+              types.append(type);
+            }
+            return types;
+          })
       .def_property_readonly("kwarg_only", [](Argument& self) -> bool {
         return self.kwarg_only();
       });

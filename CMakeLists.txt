@@ -440,6 +440,8 @@ option(
     "Name of the backend for which static dispatch code is generated, e.g.: CPU."
     "")
 option(USE_LIGHTWEIGHT_DISPATCH "Enable codegen unboxing for ATen ops, need to work with static dispatch in order to work properly." OFF)
+option(USE_EDGE_OPS "Register Edge ops into JIT op registry." OFF)
+
 if(USE_LIGHTWEIGHT_DISPATCH AND NOT STATIC_DISPATCH_BACKEND)
   message(FATAL_ERROR "Need to enable static dispatch after enabling USE_LIGHTWEIGHT_DISPATCH.")
 endif()

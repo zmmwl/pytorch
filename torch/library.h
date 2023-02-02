@@ -408,6 +408,12 @@ inline c10::FunctionSchema schema(const char* str, c10::AliasAnalysisKind k) {
   return s;
 }
 
+inline c10::FunctionSchema schema(const char* str, std::map<std::string, c10::ArrayRef<c10::ScalarType>> types) {
+  c10::FunctionSchema s = torch::jit::parseSchema(str, types);
+  s.setAliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA);
+  return s;
+}
+
 /// Function schemas can be directly constructed from string literals.
 ///
 /// \ingroup torch-schema-overloads
@@ -421,10 +427,15 @@ inline c10::FunctionSchema schema(const char* s) {
 /// rvalues.
 ///
 /// \ingroup torch-schema-overloads
-inline c10::FunctionSchema&& schema(c10::FunctionSchema&& s) {
+inline c10::FunctionSchema&& schema(c10::FunctionSchema&& s, std::map<std::string, c10::ArrayRef<c10::ScalarType>> types) {
+  (void)types;
   return std::move(s);
 }
 
+inline c10::FunctionSchema schema(c10::FunctionSchema s, std::map<std::string, c10::ArrayRef<c10::ScalarType>> types) {
+  (void)types;
+  return s;
+}
 namespace detail {
 
 inline c10::either<c10::OperatorName, c10::FunctionSchema> constructSchemaOrName(
@@ -597,9 +608,14 @@ class TORCH_API Library final {
   /// ```
 
   template <typename Schema>
-  Library& def(Schema&& raw_schema, const std::vector<at::Tag>& tags = {}, _RegisterOrVerify rv = _RegisterOrVerify::REGISTER) & {
-    c10::FunctionSchema s = schema(std::forward<Schema>(raw_schema));
+  Library& def(Schema&& raw_schema, const std::vector<at::Tag>& tags, std::map<std::string, c10::ArrayRef<c10::ScalarType>> types, _RegisterOrVerify rv = _RegisterOrVerify::REGISTER) & {
+    c10::FunctionSchema s = schema(std::forward<Schema>(raw_schema), types);
     return _def(std::move(s), nullptr, tags, rv);
+  }
+
+  template <typename Schema>
+  Library& def(Schema&& raw_schema, const std::vector<at::Tag>& tags = {}, _RegisterOrVerify rv = _RegisterOrVerify::REGISTER) & {
+    return def(raw_schema, tags, {},  rv);
   }
   /// Define an operator for a schema and then register an implementation for
   /// it.  This is typically what you would use if you aren't planning
