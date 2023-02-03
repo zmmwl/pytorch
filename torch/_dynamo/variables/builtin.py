@@ -422,13 +422,6 @@ class BuiltinVariable(VariableTracker):
             # otherwise return tensor
             else:
                 return result
-        elif isinstance(a, variables.ConstantVariable) and isinstance(
-            b, variables.ConstantVariable
-        ):
-            if self.fn is max:
-                return variables.ConstantVariable(max(a.value, b.value))
-            else:
-                return variables.ConstantVariable(min(a.value, b.value))
         elif isinstance(a, DynamicShapeVariable) or isinstance(b, DynamicShapeVariable):
             proxy = tx.output.create_proxy(
                 "call_function", self.fn, *proxy_args_kwargs([a, b], {})
