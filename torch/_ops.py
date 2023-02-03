@@ -281,6 +281,7 @@ class OpOverload(PyOperatorABC):
         )
 
     def __call__(self, *args, **kwargs):
+        # print("in op overload", self)
         return self._op(*args, **kwargs or {})
 
     def __hash__(self):

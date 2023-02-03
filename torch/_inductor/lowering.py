@@ -39,11 +39,15 @@ from .virtualized import ops, V
 
 log = logging.getLogger(__name__)
 lowerings = {}
+# sometimes we would need fallbacks for nested on ops that actually have lowerings
+nested_lowerings = {}
 layout_constraints = {}
 fallbacks = set()
 aten = torch.ops.aten
 prims = torch.ops.prims
 needs_realized_inputs = set()
+# can do something fancy like register this in register_pointwise
+nested_whitelist = {aten.relu.default, aten.tanh.default, aten.add.Tensor}
 
 
 def add_needs_realized_inputs(fn):
@@ -153,7 +157,12 @@ def get_promoted_dtype(*args, type_promotion_kind: ELEMENTWISE_TYPE_PROMOTION_KI
 
 
 def _register_lowering(
-    aten_fn, decomp_fn, broadcast, type_promotion_kind, convert_input_to_bool
+    aten_fn,
+    decomp_fn,
+    broadcast,
+    type_promotion_kind,
+    convert_input_to_bool,
+    lowerings_dict=None,
 ):
     """
     Add a lowering to lowerings dict
@@ -234,7 +243,10 @@ def _register_lowering(
                 if other_fn not in lowerings:
                     aten_fn.append(other_fn)
 
-    lowerings.update({fn: wrapped for fn in aten_fn})
+    if lowerings_dict is not None:
+        lowerings_dict.update({fn: wrapped for fn in aten_fn})
+    else:
+        lowerings.update({fn: wrapped for fn in aten_fn})
     return wrapped
 
 
@@ -243,6 +255,7 @@ def register_lowering(
     broadcast=False,
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
     convert_input_to_bool=False,
+    lowerings_dict=None,
 ):
     """
     Shim to support decorator syntax.
@@ -253,6 +266,7 @@ def register_lowering(
         broadcast=broadcast,
         type_promotion_kind=type_promotion_kind,
         convert_input_to_bool=convert_input_to_bool,
+        lowerings_dict=lowerings_dict,
     )
 
 
@@ -312,8 +326,10 @@ def make_pointwise(
     override_fn_when_input_bool=None,
     override_fn_when_cuda_float64=None,
     allow_alpha=False,
+    name=None,
 ):
     def inner(*inputs: List[TensorBox], alpha=None):
+        # print(f"IN POINTWISE FOR {name}")
         inputs = promote_constants(inputs, override_return_dtype)
         if allow_alpha:
             if alpha is not None and alpha != 1:
@@ -325,6 +341,12 @@ def make_pointwise(
         ranges = inputs[0].get_size()
         dtype = override_return_dtype or inputs[0].get_dtype()
         is_cuda = decode_device(inputs[0].get_device()).type == "cuda"
+        # Won't work for (J, D) ops
+        # FIXME: This is just bad, def need better design of get_jagged_offsets in ir but for now...
+        try:
+            jagged_offsets = inputs[0].get_jagged_offsets()
+        except AttributeError:
+            jagged_offsets = None
 
         for other in inputs[1:]:
             assert isinstance(other, ir.BaseConstant) or len(ranges) == len(
@@ -356,6 +378,7 @@ def make_pointwise(
             dtype=dtype,
             inner_fn=inner_fn,
             ranges=ranges,
+            jagged_offsets=jagged_offsets,
         )
 
     return inner
@@ -414,6 +437,7 @@ def register_pointwise(
         override_fn_when_input_bool=override_fn_when_input_bool,
         override_fn_when_cuda_float64=fn_libdevice if use_libdevice_for_f64 else None,
         allow_alpha=allow_alpha,
+        name=name,
     )
     fn = register_lowering(
         aten_fn,
@@ -983,7 +1007,7 @@ def fallback_handler(kernel):
     return handler
 
 
-def make_fallback(kernel, layout_constraint=None):
+def make_fallback(kernel, layout_constraint=None, lowerings_dict=None):
     assert (
         kernel not in decompositions
     ), f"both a fallback and a decomp for same kernel: {kernel}"
@@ -995,7 +1019,9 @@ def make_fallback(kernel, layout_constraint=None):
     add_needs_realized_inputs(kernel)
     if layout_constraint is not None:
         add_layout_constraint(kernel, layout_constraint)
-    return register_lowering(kernel, type_promotion_kind=None)(fallback_handler(kernel))
+    return register_lowering(
+        kernel, type_promotion_kind=None, lowerings_dict=lowerings_dict
+    )(fallback_handler(kernel))
 
 
 @register_lowering(aten.native_dropout, type_promotion_kind=None)
