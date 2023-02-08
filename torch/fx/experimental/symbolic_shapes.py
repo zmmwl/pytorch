@@ -1,4 +1,5 @@
 import torch
+from torch.fx.tensor_type import TensorType, Dyn, Static
 from typing import Set, Dict, List, Type, Optional, cast, Union
 import sys
 import itertools
@@ -652,6 +653,7 @@ class ShapeEnv(object):
         self.tls = threading.local()
         self.unbacked_symfloat_counter = itertools.count()
         self.unbacked_symint_counter = itertools.count()
+        self.tensor_specs: Dict[torch.Tensor, TensorType] = {}
 
     def _suppress_guards_tls(self):
         return getattr(self.tls, "suppress_guards", False)
@@ -671,7 +673,11 @@ class ShapeEnv(object):
         """
         return (len(self.replacements), len(self.divisible))
 
-    def create_symbolic_sizes_strides_storage_offset(self, ex: torch.Tensor, source: Source):
+    def create_symbolic_sizes_strides_storage_offset(
+        self,
+        ex: torch.Tensor,
+        source: Source,
+    ):
         """
         Returns a list of symbolic sizes and strides for the given tensor.
         We try our best to express stride in terms of the sizes, so as to not
@@ -679,19 +685,44 @@ class ShapeEnv(object):
         """
         from torch._dynamo.source import TensorPropertySource, TensorProperty
 
-        size = [
-            self.create_symbol(
-                val, TensorPropertySource(source, TensorProperty.SIZE, i)
-            ) for i, val in enumerate(ex.size())
-        ]
-        stride: List[Optional[sympy.Expr]] = [None] * len(size)
+        dynamic_spec = self.tensor_specs.get(ex, None)
+
+        rank = len(ex.size())
+
+        # breakpoint()
+        size: List[sympy.Expr] = []
+        if dynamic_spec:
+            assert len(dynamic_spec) == rank, "dynamic_spec must be same rank as tensor"
+            for i, val in enumerate(ex.size()):
+                if dynamic_spec[i] is Dyn:
+                    size.append(
+                        self.create_symbol(
+                            val, TensorPropertySource(source, TensorProperty.SIZE, i)
+                        )
+                    )
+                else:
+                    if isinstance(dynamic_spec[i], int) and dynamic_spec[i] != val:
+                        raise RuntimeError(
+                            f"Actualy size {ex.size()} does not match dynamic spec {dynamic_spec} at dim {i}"
+                        )
+                    size.append(sympy.Integer(val))
+        else:
+            size = [
+                self.create_symbol(
+                    val, TensorPropertySource(source, TensorProperty.SIZE, i)
+                ) for i, val in enumerate(ex.size())
+            ]
+
+        # breakpoint()
+
+        stride: List[Optional[sympy.Expr]] = [None] * rank
         for i, val in enumerate(ex.stride()):
             if val in (0, 1):
                 stride[i] = sympy.Integer(val)
         while any(x is None for x in stride):
             candidates = {
                 ex.size(i) * ex.stride()[i]: size[i] * stride[i]
-                for i in range(len(size))
+                for i in range(rank)
                 if stride[i] is not None and ex.stride()[i] >= 0
             }
             # iterate over unbound strides in sorted order
@@ -761,6 +792,7 @@ class ShapeEnv(object):
 
         # Create a duck sized int if necessary
         if val not in self.val_to_var:
+            # NB: inductor relies on the name being prefixed with 's'
             sympy_expr = Symbol(f"s{len(self.var_to_val)}", positive=True, integer=True)
             self.var_to_val[sympy_expr] = sympy.Integer(val)
             self.val_to_var[val] = sympy_expr

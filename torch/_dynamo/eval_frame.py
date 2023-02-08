@@ -337,7 +337,10 @@ def catch_errors_wrapper(callback, hooks: Hooks):
 
 
 def _optimize_catch_errors(
-    compile_fn, hooks: Hooks, backend_ctx_ctor=null_context, dynamic=False
+    compile_fn,
+    hooks: Hooks,
+    backend_ctx_ctor=null_context,
+    dynamic=False,
 ):
     return OptimizeContext(
         catch_errors_wrapper(compile_fn, hooks),
@@ -383,6 +386,7 @@ def optimize(
     guard_fail_fn=None,
     disable=False,
     dynamic=False,
+    dynamic_spec=None,
 ):
     """
     The main entrypoint of TorchDynamo.  Do graph capture and call
@@ -435,10 +439,11 @@ def optimize(
         return optimize_assert(
             backend,
             dynamic=dynamic,
+            dynamic_spec=dynamic_spec,
             hooks=hooks,
         )
     return _optimize_catch_errors(
-        convert_frame.convert_frame(backend, hooks=hooks),
+        convert_frame.convert_frame(backend, hooks=hooks, dynamic_spec=dynamic_spec),
         hooks,
         backend_ctx_ctor,
         dynamic=dynamic,
@@ -524,7 +529,13 @@ def explain(f, *args, **kwargs):
 
 
 def export(
-    f, *args, aten_graph=False, decomposition_table=None, tracing_mode="real", **kwargs
+    f,
+    *args,
+    aten_graph=False,
+    decomposition_table=None,
+    tracing_mode="real",
+    dynamic_spec=None,
+    **kwargs,
 ):
     torch._C._log_api_usage_once("torch._dynamo.export")
     if decomposition_table is not None or tracing_mode != "real":
@@ -603,6 +614,7 @@ def export(
             hooks=Hooks(guard_export_fn=guard_export_print, guard_fail_fn=None),
             export=True,
             dynamic=(tracing_mode == "symbolic"),
+            dynamic_spec=dynamic_spec,
         )(f)
         # TODO(voz): We may have instances of `f` that mutate inputs, we should track sideffects and reject.
         result_traced = opt_f(*args, **kwargs)
@@ -693,7 +705,9 @@ def assume_constant_result(fn):
     return fn
 
 
-def optimize_assert(backend, *, hooks=Hooks(None, None), export=False, dynamic=False):
+def optimize_assert(
+    backend, *, hooks=Hooks(None, None), export=False, dynamic=False, dynamic_spec=None
+):
     """
     The same as `torch._dynamo.optimize(backend, nopython=True)`
     """
@@ -703,7 +717,9 @@ def optimize_assert(backend, *, hooks=Hooks(None, None), export=False, dynamic=F
     backend_ctx_ctor = getattr(backend, "backend_ctx_ctor", null_context)
 
     return _optimize_catch_errors(
-        convert_frame.convert_frame_assert(backend, export=export),
+        convert_frame.convert_frame_assert(
+            backend, export=export, dynamic_spec=dynamic_spec
+        ),
         hooks,
         backend_ctx_ctor,
         dynamic=dynamic,

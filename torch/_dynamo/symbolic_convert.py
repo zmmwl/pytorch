@@ -1631,6 +1631,7 @@ class InstructionTranslator(InstructionTranslatorBase):
         one_graph,
         export,
         mutated_closure_cell_contents: Set[str],
+        dynamic_spec=None,
     ):
         super(InstructionTranslator, self).__init__(
             output=OutputGraph(f_globals, code_options, compiler_fn, self),
@@ -1656,6 +1657,8 @@ class InstructionTranslator(InstructionTranslatorBase):
         vars = list(code_options["co_varnames"])
         vars.extend(x for x in self.cell_and_freevars() if x not in vars)
 
+        dynamic_spec = dynamic_spec or {}
+
         self.symbolic_locals = collections.OrderedDict(
             (
                 k,
@@ -1664,7 +1667,7 @@ class InstructionTranslator(InstructionTranslatorBase):
                     LocalInputSource(k, code_options["co_varnames"].index(k))
                     if k in code_options["co_varnames"]
                     else LocalSource((k)),
-                )(f_locals[k]),
+                )(f_locals[k], dynamic_spec=dynamic_spec.get(k, None),),
             )
             for k in vars
             if k in f_locals
