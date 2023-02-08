@@ -1,5 +1,5 @@
 import torch
-from typing import Set, Dict, List, Type, Optional, cast, Union
+from typing import Set, Dict, List, Type, Optional, cast, Union, Tuple
 import sys
 import builtins
 import itertools
@@ -739,6 +739,13 @@ def _make_node_magic(method, func):
         else:
             pytype = self.pytype
 
+        # Historically, boolean evaluation forces guards.  We continue this
+        # historical precedent to avoid changing evaluation behavior, but only
+        # if everything is hinted (if there are unbacked nodes, we must NOT
+        # guard eagerly)
+        if pytype is bool and out_hint is not None and len(out.free_symbols) != 0:
+            out = self.shape_env.evaluate_expr(out, out_hint)
+
         return SymNode(out, self.shape_env, pytype, out_hint)
 
     def unary_magic_impl(self):
@@ -763,6 +770,9 @@ def _make_node_magic(method, func):
             pytype = float
         else:
             pytype = self.pytype
+
+        if pytype is bool and out_hint is not None and len(out.free_symbols) != 0:
+            out = self.shape_env.evaluate_expr(out, out_hint)
 
         return SymNode(out, self.shape_env, pytype, out_hint)
 
@@ -962,11 +972,25 @@ class ShapeEnv(object):
         self.replacements: Dict["sympy.Symbol", "sympy.Expr"] = {}  #
         # Set holds a % b expressions that evaluate to 0.
         self.divisible: Set["sympy.Expr"] = set()
+        # Maps from indicator invocations to their values when guarded on
+        self.indicator_replacements: Dict["sympy.Expr", "sympy.Integer"]
         # Duck-shaping says that if two input tensors have the same size,
         # they get assigned the same symbolic variable
         self.val_to_var: Dict[int, "sympy.Expr"] = {0: sympy.Integer(0), 1: sympy.Integer(1)}
         self.unbacked_symfloat_counter = itertools.count()
         self.unbacked_symint_counter = itertools.count()
+        # A bunch of facts involving unbacked symints that we can
+        # attempt replacements with.  This is very dumb and should
+        # be replaced with a proper entailment mechanism.
+        #
+        # The dictionary is indexed in the following way.  Suppose you have
+        # a replacement s0 + s1 to e2.  We arbitrarily pick a symbol in
+        # the source expression and place this substitution in the list of
+        # that key; e.g., {s0: (s0 + s1, e2)}.  We will only attempt this
+        # substitution if s0 is present in the guard we're attempting to
+        # evaluate.  The choice of key is arbitrary, since we will check
+        # for both s0 and s1 substitutions if s0 + s1 is in the key.
+        self.expr_subs: Dict["sympy.Symbol", List[Tuple["sympy.Expr", "sympy.Expr"]]] = collections.defaultdict(list)
 
     def _suppress_guards_tls(self):
         return getattr(TLS, "suppress_guards", False)
@@ -1364,6 +1388,13 @@ class ShapeEnv(object):
         new_expr = safe_expand(new_expr.xreplace(floor_div_replace))
         if len(list(new_expr.free_symbols)) == 0:
             return new_expr
+
+        # Attempt expr_subs on the original expression
+        for s in new_expr.free_symbols:
+            new_expr = new_expr.subs(self.expr_subs[s])
+        if len(list(new_expr.free_symbols)) == 0:
+            return new_expr
+
         return None
 
     @_lru_cache
@@ -1404,6 +1435,10 @@ class ShapeEnv(object):
         """
         result_expr = safe_expand(expr).xreplace(self.var_to_val)
         if len(result_expr.free_symbols) != 0:
+            for s in result_expr.free_symbols:
+                result_expr = result_expr.subs(self.expr_subs[s])
+            if len(list(result_expr.free_symbols)) == 0:
+                return result_expr
             raise self._make_data_dependent_error(result_expr)
         return result_expr
 
@@ -1448,6 +1483,22 @@ class ShapeEnv(object):
         simplify shapes (i.e. a == b or a % 5 == 0)
         """
         assert type(concrete_bool) is bool
+
+        lhs = expr.lhs
+        rhs = expr.rhs
+        # For convenience, we assume the indicator variable is always tested
+        # on the left hand side
+        assert not isinstance(rhs, IndicatorTypes)
+        if isinstance(lhs, IndicatorTypes):
+            # Indicator variables only ever are 0/1, so we can make inferences
+            # even if we only have Ne
+            if isinstance(expr, sympy.Eq):
+                replace_expr = rhs
+            elif isinstance(expr, sympy.Ne):
+                replace_expr = 1 - rhs
+            self.indicator_replacements[lhs] = replace_expr
+            return
+
         if isinstance(expr, sympy.Eq):
             if not concrete_bool:
                 return
@@ -1465,8 +1516,6 @@ class ShapeEnv(object):
         if len(free) > 5:
             return
         free = sorted(free, key=lambda x: (self.size_hint(x), x.name), reverse=True)  # type: ignore[attr-defined]
-        lhs = expr.lhs
-        rhs = expr.rhs
         if not expr.has(sympy.Mod):
             try:
                 solutions = sympy.solve(lhs - rhs, free[0], dict=True)
