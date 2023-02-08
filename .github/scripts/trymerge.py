@@ -1109,6 +1109,28 @@ class MandatoryChecksMissingError(Exception):
         super().__init__(message)
         self.rule = rule
 
+class ExceptionWithInternalReason(Exception):
+    def __init__(self, reason: Union[str, Exception], internal_info: Optional[str] = None, title: str = "Merge failed") -> None:
+        exception = f"**Reason**: {reason}"
+
+        run_url = os.getenv("GH_RUN_URL")
+
+        internal_debugging: List[str] = []
+        if internal_info is not None:
+            internal_debugging.extend([internal_info, "", ""])
+        if run_url is not None:
+            internal_debugging.append(f"Raised by <a href=\"{run_url}\">workflow job</a>")
+        if len(internal_debugging) > 0:
+            # Hide this behind a collapsed bullet since it's not helpful to most devs
+            internal_debugging = ["<details><summary>Details for Dev Infra team</summary>", ""] + \
+                internal_debugging + \
+                ["", "</details>"]
+        msg = [
+            f"## {title}",
+            f"{exception}",
+            ""] + internal_debugging
+        super().__init__("\n".join(msg))
+
 class PostCommentError(Exception):
     pass
 
@@ -1197,7 +1219,10 @@ def find_matching_merge_rule(
     # Score 10K - matched all files, but no overlapping approvers
     # Score 20K - matched all files and approvers, but mandatory checks are pending
     # Score 30k - Matched all files and approvers, but mandatory checks failed
+
     reject_reason_score = 0
+    broken_rule = None
+
     for rule in rules:
         rule_name = rule.name
         patterns_re = patterns_to_regex(rule.patterns)
@@ -1211,6 +1236,7 @@ def find_matching_merge_rule(
             num_matching_files = len(changed_files) - len(non_matching_files)
             if num_matching_files > reject_reason_score:
                 reject_reason_score = num_matching_files
+                broken_rule = rule
                 reject_reason = "\n".join((
                     f"Not all files match rule `{rule_name}`."
                     f"{num_matching_files} files matched, but there are still non-matching files:"
@@ -1222,7 +1248,8 @@ def find_matching_merge_rule(
         if len(rule.approved_by) > 0 and len(approved_by) == 0:
             if reject_reason_score < 10000:
                 reject_reason_score = 10000
-                reject_reason = f"PR #{pr.pr_num} has not been reviewed yet (Rule {rule_name})"
+                broken_rule = rule
+                reject_reason = f"PR #{pr.pr_num} has not been reviewed yet"
             continue
 
         # Does the PR have the required approvals for this rule?
@@ -1238,8 +1265,9 @@ def find_matching_merge_rule(
         if len(approvers_intersection) == 0 and len(rule_approvers_set) > 0:
             if reject_reason_score < 10000:
                 reject_reason_score = 10000
+                broken_rule = rule
                 reject_reason = "\n".join((
-                    f"Approval needed from one of the following (Rule '{rule_name}'):",
+                    "Approval needed from one of the following:",
                     f"{', '.join(list(rule_approvers_set)[:5])}{', ...' if len(rule_approvers_set) > 5 else ''}"
                 ))
             continue
@@ -1257,8 +1285,9 @@ def find_matching_merge_rule(
         if len(failed_checks) > 0:
             if reject_reason_score < 30000:
                 reject_reason_score = 30000
+                broken_rule = rule
                 reject_reason = "\n".join((
-                    f"{len(failed_checks)} mandatory check(s) failed (Rule `{rule_name}`).  The first few are:",
+                    f"{len(failed_checks)} mandatory check(s) failed.  The first few are:",
                     *checks_to_markdown_bullets(failed_checks),
                     "",
                     f"Dig deeper by [viewing the failures on hud]({hud_link})"
@@ -1267,8 +1296,9 @@ def find_matching_merge_rule(
         elif len(pending_checks) > 0:
             if reject_reason_score < 20000:
                 reject_reason_score = 20000
+                broken_rule = rule
                 reject_reason = "\n".join((
-                    f"{len(pending_checks)} mandatory check(s) are pending/not yet run (Rule `{rule_name}`).  The first few are:",
+                    f"{len(pending_checks)} mandatory check(s) are pending/not yet run.  The first few are:",
                     *checks_to_markdown_bullets(pending_checks),
                     "",
                     f"Dig deeper by [viewing the pending checks on hud]({hud_link})"
@@ -1276,13 +1306,20 @@ def find_matching_merge_rule(
             continue
 
         if not skip_internal_checks and pr.has_internal_changes():
-            raise RuntimeError("This PR has internal changes and must be landed via Phabricator")
+            raise ExceptionWithInternalReason(
+                reason=RuntimeError("This PR has internal changes and must be landed via Phabricator"),
+                internal_info=f"Rule {rule}",
+                title="Merge failed"
+            )
 
         return rule
 
     if reject_reason_score == 20000:
-        raise MandatoryChecksMissingError(reject_reason, rule)
-    raise RuntimeError(reject_reason)
+        raise MandatoryChecksMissingError(reject_reason, broken_rule)
+    if broken_rule is not None:
+        raise ExceptionWithInternalReason(reject_reason, internal_info=f"Rule {broken_rule.name}", title="Merge failed")
+    else:
+        raise ExceptionWithInternalReason(reject_reason, title="Merge failed")
 
 
 def get_land_checkrun_conclusions(org: str, project: str, commit: str) -> JobNameToStateDict:
@@ -1713,26 +1750,9 @@ def main() -> None:
     pr = GitHubPR(org, project, args.pr_num)
 
     def handle_exception(e: Exception, title: str = "Merge failed") -> None:
-        exception = f"**Reason**: {e}"
-
-        internal_debugging = ""
-        run_url = os.getenv("GH_RUN_URL")
-        if run_url is not None:
-            # Hide this behind a collapsed bullet since it's not helpful to most devs
-            internal_debugging = "\n".join((
-                "<details><summary>Details for Dev Infra team</summary>",
-                f"Raised by <a href=\"{run_url}\">workflow job</a>",
-                "</details>"
-            ))
-
-        msg = "\n".join((
-            f"## {title}",
-            f"{exception}",
-            "",
-            f"{internal_debugging}"
-        ))
-
-        gh_post_pr_comment(org, project, args.pr_num, msg, dry_run=args.dry_run)
+        if not isinstance(e, ExceptionWithInternalReason):
+            e = ExceptionWithInternalReason(e, title=title)
+        gh_post_pr_comment(org, project, args.pr_num, str(e), dry_run=args.dry_run)
         import traceback
         traceback.print_exc()
 
