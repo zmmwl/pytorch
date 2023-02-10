@@ -1,5 +1,5 @@
 from .quantize import *  # noqa: F403
-from .observer import *  # noqa: F403
+# from .observer import *  # noqa: F403
 from .qconfig import *  # noqa: F403
 from .fake_quantize import *  # noqa: F403
 from .fuse_modules import fuse_modules
@@ -9,6 +9,19 @@ from .quantize_jit import *  # noqa: F403
 # from .quantize_fx import *
 from .quantization_mappings import *  # noqa: F403
 from .fuser_method_mappings import *  # noqa: F403
+
+from torch.utils._ao_migration_utils import (
+    _import_names_with_prefix,
+    _get_module_getattr_override,
+)
+
+from .observer import _deprecated_names as _observer_deprecated_names
+from torch.ao.quantization import observer as __orig_observer_mod
+_import_names_with_prefix(__name__, __orig_observer_mod, _observer_deprecated_names)
+# TODO(this PR): also add from all the other submodules
+_deprecated_names = _observer_deprecated_names
+__getattr__ = _get_module_getattr_override(__name__, _deprecated_names)
+
 
 def default_eval_fn(model, calib_data):
     r"""
