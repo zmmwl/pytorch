@@ -225,6 +225,55 @@ void TensorImpl::HandleResize() {
   }
 }
 
+// base, sizes, strides
+static c10::optional<
+    std::tuple<SymNode, std::vector<SymNode>, std::vector<SymNode>>>
+normalize_sym_sizes_strides(SymIntArrayRef sizes, SymIntArrayRef strides) {
+  // Look for a SymNode to dispatch on
+  SymNode base;
+  bool all_hinted = true;
+  for (const auto& s : sizes) {
+    if (all_hinted && !s.has_hint()) {
+      all_hinted = false;
+    }
+    if (!base && s.is_symbolic()) {
+      base = s.toSymNodeImpl();
+    }
+  }
+  for (const auto& s : strides) {
+    if (all_hinted && !s.has_hint()) {
+      all_hinted = false;
+    }
+    if (!base && s.is_symbolic()) {
+      base = s.toSymNodeImpl();
+    }
+  }
+  if (!base || all_hinted) {
+    // Couldn't find.  Tell the caller to do the normal computation
+    // Alternately, if everything is hinted, we want the normal computation
+    // too
+    return c10::nullopt;
+  }
+  // Populate the SymNode array
+  std::vector<SymNode> size_nodes;
+  std::vector<SymNode> stride_nodes;
+  size_nodes.reserve(sizes.size());
+  stride_nodes.reserve(strides.size());
+  for (const auto& s : sizes) {
+    size_nodes.emplace_back(
+        s.is_symbolic() ? s.toSymNodeImpl()
+                        : base->wrap_int(s.as_int_unchecked()));
+  }
+  for (const auto& s : strides) {
+    stride_nodes.emplace_back(
+        s.is_symbolic() ? s.toSymNodeImpl()
+                        : base->wrap_int(s.as_int_unchecked()));
+  }
+  return c10::make_optional(
+      std::tuple<SymNode, std::vector<SymNode>, std::vector<SymNode>>(
+          std::move(base), std::move(size_nodes), std::move(stride_nodes)));
+}
+
 template <typename T>
 bool _compute_contiguous(ArrayRef<T> sizes, ArrayRef<T> strides, T numel) {
   bool is_contiguous = true;
@@ -260,8 +309,18 @@ SymBool TensorImpl::compute_contiguous(identity<SymBool>) const {
   if (is_sparse()) {
     return false;
   }
-  return _compute_contiguous<c10::SymInt>(
-      extra_meta_->sizes_, extra_meta_->strides_, extra_meta_->numel_);
+  SymIntArrayRef sizes = extra_meta_->sizes_;
+  SymIntArrayRef strides = extra_meta_->strides_;
+  auto n = normalize_sym_sizes_strides(sizes, strides);
+  if (n.has_value()) {
+    SymNode base;
+    std::vector<SymNode> size_nodes;
+    std::vector<SymNode> stride_nodes;
+    std::tie(base, size_nodes, stride_nodes) = *n;
+    return SymBool(base->is_contiguous(size_nodes, stride_nodes));
+  } else {
+    return _compute_contiguous(sizes, strides, extra_meta_->numel_);
+  }
 }
 
 template <typename T>
@@ -307,8 +366,19 @@ SymBool TensorImpl::compute_channels_last_contiguous_2d(
   if (is_sparse()) {
     return false;
   }
-  return _compute_channels_last_contiguous_2d<c10::SymInt>(
-      extra_meta_->sizes_, extra_meta_->strides_);
+  SymIntArrayRef sizes = extra_meta_->sizes_;
+  SymIntArrayRef strides = extra_meta_->strides_;
+  auto n = normalize_sym_sizes_strides(sizes, strides);
+  if (n.has_value()) {
+    SymNode base;
+    std::vector<SymNode> size_nodes;
+    std::vector<SymNode> stride_nodes;
+    std::tie(base, size_nodes, stride_nodes) = *n;
+    return SymBool(
+        base->is_channels_last_contiguous_2d(size_nodes, stride_nodes));
+  } else {
+    return _compute_channels_last_contiguous_2d(sizes, strides);
+  }
 }
 
 template <typename T>
@@ -354,8 +424,19 @@ SymBool TensorImpl::compute_channels_last_contiguous_3d(
   if (is_sparse()) {
     return false;
   }
-  return _compute_channels_last_contiguous_3d<c10::SymInt>(
-      extra_meta_->sizes_, extra_meta_->strides_);
+  SymIntArrayRef sizes = extra_meta_->sizes_;
+  SymIntArrayRef strides = extra_meta_->strides_;
+  auto n = normalize_sym_sizes_strides(sizes, strides);
+  if (n.has_value()) {
+    SymNode base;
+    std::vector<SymNode> size_nodes;
+    std::vector<SymNode> stride_nodes;
+    std::tie(base, size_nodes, stride_nodes) = *n;
+    return SymBool(
+        base->is_channels_last_contiguous_3d(size_nodes, stride_nodes));
+  } else {
+    return _compute_channels_last_contiguous_3d(sizes, strides);
+  }
 }
 
 bool TensorImpl::compute_strides_like_channels_last_2d(identity<bool>) const {
@@ -372,8 +453,18 @@ SymBool TensorImpl::compute_strides_like_channels_last_2d(
   if (is_sparse()) {
     return false;
   }
-  return is_channels_last_strides_2d<c10::SymInt>(
-      extra_meta_->sizes_, extra_meta_->strides_);
+  SymIntArrayRef sizes = extra_meta_->sizes_;
+  SymIntArrayRef strides = extra_meta_->strides_;
+  auto n = normalize_sym_sizes_strides(sizes, strides);
+  if (n.has_value()) {
+    SymNode base;
+    std::vector<SymNode> size_nodes;
+    std::vector<SymNode> stride_nodes;
+    std::tie(base, size_nodes, stride_nodes) = *n;
+    return SymBool(base->is_channels_last_strides_2d(size_nodes, stride_nodes));
+  } else {
+    return is_channels_last_strides_2d(sizes, strides);
+  }
 }
 
 bool TensorImpl::compute_strides_like_channels_last_3d(identity<bool>) const {
@@ -390,8 +481,18 @@ SymBool TensorImpl::compute_strides_like_channels_last_3d(
   if (is_sparse()) {
     return false;
   }
-  return is_channels_last_strides_3d<c10::SymInt>(
-      extra_meta_->sizes_, extra_meta_->strides_);
+  SymIntArrayRef sizes = extra_meta_->sizes_;
+  SymIntArrayRef strides = extra_meta_->strides_;
+  auto n = normalize_sym_sizes_strides(sizes, strides);
+  if (n.has_value()) {
+    SymNode base;
+    std::vector<SymNode> size_nodes;
+    std::vector<SymNode> stride_nodes;
+    std::tie(base, size_nodes, stride_nodes) = *n;
+    return SymBool(base->is_channels_last_strides_3d(size_nodes, stride_nodes));
+  } else {
+    return is_channels_last_strides_3d(sizes, strides);
+  }
 }
 
 template <typename T>
@@ -443,8 +544,19 @@ SymBool TensorImpl::compute_non_overlapping_and_dense(identity<SymBool>) const {
   if (is_sparse()) {
     return false;
   }
-  return _compute_non_overlapping_and_dense<c10::SymInt>(
-      extra_meta_->sizes_, extra_meta_->strides_);
+  SymIntArrayRef sizes = extra_meta_->sizes_;
+  SymIntArrayRef strides = extra_meta_->strides_;
+  auto n = normalize_sym_sizes_strides(sizes, strides);
+  if (n.has_value()) {
+    SymNode base;
+    std::vector<SymNode> size_nodes;
+    std::vector<SymNode> stride_nodes;
+    std::tie(base, size_nodes, stride_nodes) = *n;
+    return SymBool(
+        base->is_non_overlapping_and_dense(size_nodes, stride_nodes));
+  } else {
+    return _compute_non_overlapping_and_dense(sizes, strides);
+  }
 }
 
 // Glue compute
