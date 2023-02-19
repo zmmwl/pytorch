@@ -1549,15 +1549,57 @@ class ShapeEnv:
         self.divisible = new_divisible
 
     @_lru_cache
+    def _is_divisible(self, x, y):
+        return x % y == 0 or x % y in self.divisible
+
+    @_lru_cache
+    def _elim_floor(self, x, y):
+        if type(x) is sympy.floor and type(x.args[0]) is sympy.Mul:
+            m1, m2 = x.args[0].args
+            ry = 1 / y
+            if m2 == ry and self._is_divisible(m1, y):  # inner mul is div
+                return m1
+        elif type(x) is FloorDiv:
+            if x.divisor == y and self._is_divisible(x.base, y):
+                return x.base
+
+    @_lru_cache
     def simplify(self, expr: "sympy.Expr") -> "sympy.Expr":
         expr = self.replace(expr)
-        if expr.has(FloorDiv):
+        if expr.has(FloorDiv, sympy.floor) and expr.has(sympy.Mul):
             self._update_divisible()
             div_replacements = {}
-            for atom in expr.atoms(FloorDiv):
-                base, divisor = atom.args
-                if self.replace(base % divisor) in self.divisible:
-                    div_replacements[atom] = sympy.floor(base / divisor)
+            for atom in expr.atoms(sympy.Mul):
+                args = []
+                # expands Pow into Muls to optimize better
+                for x in atom.args:
+                    if type(x) is sympy.Pow and isinstance(x.exp, sympy.Integer):
+                        for _ in range(abs(x.exp)):
+                            args.append(1 / x.base if x.exp < 0 else x.base)
+                        continue
+                    args.append(x)
+                # processes args
+                enum_args = list(enumerate(args))
+                used_args = set()
+                mul_res = []
+                mul_pairs = itertools.combinations(enum_args, 2)
+                # Mul is vararg: greedily finds pairs that can be optimized
+                for (i, x), (j, y) in mul_pairs:
+                    # avoids arg reuse
+                    if i in used_args or j in used_args:
+                        continue
+                    # optimizes floor and Mul
+                    elim_res = self._elim_floor(x, y) or self._elim_floor(y, x)
+                    if elim_res:
+                        mul_res.append(elim_res)
+                        used_args.add(i)
+                        used_args.add(j)
+                # processes unused args
+                for i, x in enum_args:
+                    if i not in used_args:
+                        mul_res.append(x)
+                # creates a new Mul expr
+                div_replacements[atom] = sympy.Mul(*mul_res)
             expr = expr.xreplace(div_replacements)
             expr = safe_expand(expr)
         return expr
