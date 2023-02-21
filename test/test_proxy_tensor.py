@@ -912,6 +912,23 @@ def forward(self, a_1):
     return empty"""  # noqa: B950
         )
 
+    def test_boolean_index(self):
+        def f(images, handedness):
+            right_hand_mask = handedness == 1
+            images[right_hand_mask] = images[right_hand_mask].flip(-1)
+
+        r = str(make_fx(f, tracing_mode="symbolic")(
+            torch.randint(0, 256, (512, 1, 1, 96, 96)),
+            torch.randint(0, 1, (512, 1, 1))
+        ).code).strip()
+        self.assertExpectedInline(r, """\
+def forward(self, images_1, handedness_1):
+    eq = torch.ops.aten.eq.Scalar(handedness_1, 1);  handedness_1 = None
+    index = torch.ops.aten.index.Tensor(images_1, [eq])
+    flip = torch.ops.aten.flip.default(index, [-1]);  index = None
+    index_put_ = torch.ops.aten.index_put_.default(images_1, [eq], flip);  images_1 = eq = flip = None
+    return None""")
+
     def test_neg_shape(self):
         def f(a):
             return torch.empty(-a.shape[0] + 10)
@@ -1202,7 +1219,6 @@ symbolic_tensor_failures = {
     xfail('masked.cumprod', ''),  # aten._to_copy.default - couldn't find symbolic meta function/decomposition
     xfail('addmv', ''),  # aten.addmv.default - couldn't find symbolic meta function/decomposition
     xfail('aminmax', ''),  # aten.aminmax.default - couldn't find symbolic meta function/decomposition
-    xfail('argwhere', ''),  # aten.nonzero.default - couldn't find symbolic meta function/decomposition
     xfail('baddbmm', ''),  # aten.baddbmm.default - couldn't find symbolic meta function/decomposition
     xfail('cdist', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
     xfail('cholesky_solve', ''),  # Could not run 'aten::_cholesky_solve_helper' with arguments from the 'Meta' back...
@@ -1317,7 +1333,6 @@ symbolic_tensor_failures = {
     xfail('nn.functional.pdist', ''),  # Could not run 'aten::_pdist_forward' with arguments from the 'Meta' backend...
     xfail('nn.functional.pixel_unshuffle', ''),  # aten.pixel_unshuffle.default - couldn't find symbolic meta function/deco...
     xfail('nn.functional.smooth_l1_loss', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
-    xfail('nonzero', ''),  # aten.nonzero.default - couldn't find symbolic meta function/decomposition
     xfail('normal', 'number_mean'),  # aten.normal.float_Tensor - couldn't find symbolic meta function/decomposition
     xfail('ormqr', ''),  # aten.ormqr.default - couldn't find symbolic meta function/decomposition
     xfail('pca_lowrank', ''),  # aten.mm.default - couldn't find symbolic meta function/decomposition
