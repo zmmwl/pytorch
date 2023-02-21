@@ -584,13 +584,31 @@ def infer_size(a, b):
         dimB = dimsB - 1 - offset
         sizeA = a[dimA] if dimA >= 0 else 1
         sizeB = b[dimB] if dimB >= 0 else 1
-        if not (sizeA == sizeB or sizeA == 1 or sizeB == 1):
+        from torch.fx.experimental.symbolic_shapes import definitely_true
+
+        # First, check if there is a backed SymInt which is one.  If so, we
+        # can avoid poking the other size (potentially unbacked) at all
+        if definitely_true(sizeA == 1):
+            expandedSizes[i] = sizeB
+        elif definitely_true(sizeB == 1):
+            expandedSizes[i] = sizeA
+        # Next, check for equality (even if sizeA is unbacked, it will compare
+        # equal to itself)
+        elif sizeA == sizeB:
+            expandedSizes[i] = sizeA
+        # Finally, force guards on unbacked SymInts.  This branch will
+        # probably fail; if it's possible for this branch to succeed we
+        # may need to make parallel_or more smart.
+        elif sizeB == 1:
+            expandedSizes[i] = sizeA
+        elif sizeA == 1:
+            expandedSizes[i] = sizeB
+        else:
             raise RuntimeError(
                 f"The size of tensor a ({sizeA}) "
                 f"must match the size of tensor b ({sizeB}) "
                 f"at non-singleton dimension {i})"
             )
-        expandedSizes[i] = sizeB if sizeA == 1 else sizeA
     return tuple(expandedSizes)
 
 

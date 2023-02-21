@@ -77,6 +77,7 @@ torch_function_passthrough = {
     torch.Tensor.device.__get__,  # type: ignore[attr-defined]
     torch.Tensor.requires_grad.__get__,  # type: ignore[attr-defined]
     torch.Tensor.layout.__get__,  # type: ignore[attr-defined]
+    torch.Tensor.is_contiguous,
     # For TorchRefsMode only
     torch.Tensor.__format__,
     torch.Tensor.__repr__,
@@ -371,6 +372,16 @@ def compute_elementwise_output_logical_to_physical_perm(*tensors, _skip_checks=F
         return []
     if ndim == 1:
         return [0]
+
+    # Short-circuits if contiguous, following the fake fast path.
+    # This reduces the number of guards we end up making
+    # TODO: do channels last too
+    is_contiguous = True
+    for t in tensors:
+        is_contiguous = is_contiguous and t.is_contiguous(memory_format=torch.contiguous_format)
+
+    if is_contiguous:
+        return list(range(ndim))
 
     shape = tensors[0].shape
 
