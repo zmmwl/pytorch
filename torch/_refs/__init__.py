@@ -2754,7 +2754,6 @@ def dstack(tensors: TensorSequenceType) -> TensorLikeType:
     return cat(aligned_tensors, 2)
 
 
-@register_decomposition(aten.expand)
 def expand(a: Tensor, *shape) -> Tensor:
     # NOTE: cannot use utils.extract_shape_from_varargs here
     # because that also validates the shape, but the shape
