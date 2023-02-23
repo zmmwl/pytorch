@@ -4353,24 +4353,32 @@ class TestSparseAny(TestCase):
                 from_layout, device=device, dtype=dtype, index_dtype=index_dtype):
             batch_dim = t.dim() - t.dense_dim() - t.sparse_dim()
             if batch_dim > 0:
+                # Temporarily skipping batch samples.
                 # TODO: implement batch support in _convert_indices_from_csr_to_coo
                 continue
             t = t.clone().detach().requires_grad_(True)
-            if not fast_mode and not gradcheck.masked:
-                # TODO: remove this if-block when TODO items below are resolved
+
+            if not gradcheck.masked and from_layout != torch.sparse_coo:
+                # TODO: remove this if-block when all errors below are resolved
                 try:
                     gradcheck(torch.Tensor.to_dense, t, fast_mode=fast_mode)
                 except RuntimeError as msg:
-                    # TODO: implement non-masked semantics support in to_dense_backward
-                    with self.assertRaisesRegex(RuntimeError, "Jacobian mismatch"):
-                        gradcheck(torch.Tensor.to_dense, t, fast_mode=fast_mode)
-                    self.skipTest('non-masked semantics not supported')
-            r = gradcheck(torch.Tensor.to_dense, t, fast_mode=fast_mode)
-            self.assertTrue(r)
+                    error_msg = str(msg).splitlines()[0]
+                    if error_msg in {
+                            'grad is sparse_csr tensor, but has incorrect dense_dim',
+                            'grad is sparse_csc tensor, but has incorrect dense_dim',
+                            'Expect the same number of specified elements per batch.',
+                            'Tensor size(-2) 3 needs to be divisible by blocksize[0] 2',
+                    }:
+                        self.skipTest(f'{error_msg}')
+                    raise
 
-        # when the following assert fails, it means that the if-block
-        # above and the assertFalse test below can be safely removed
-        self.assertFalse(not fast_mode and not gradcheck.masked)
+            self.assertTrue(gradcheck(torch.Tensor.to_dense, t, fast_mode=fast_mode))
+
+        # When the following assert fails, this is a good thing. It
+        # means that the if-block above and the assertFalse test below
+        # can be safely removed.
+        self.assertFalse(not gradcheck.masked and from_layout != torch.sparse_coo)
 
     @all_sparse_layouts('from_layout', include_strided=True)
     @all_sparse_layouts('to_layout', include_strided=False)

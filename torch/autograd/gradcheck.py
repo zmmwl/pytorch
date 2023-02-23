@@ -727,7 +727,8 @@ def _get_analytical_vjps_wrt_specific_output(vjp_fn, sample_output, v) -> List[L
     return vjps
 
 
-def _check_inputs(tupled_inputs, check_sparse_nnz, masked) -> bool:
+def _check_inputs(tupled_inputs, check_sparse_nnz) -> bool:
+    masked = not torch.sparse.sparse_semantics.is_enabled()
     if masked and not check_sparse_nnz and any(_is_sparse_any_tensor(t) for t in tupled_inputs if isinstance(t, torch.Tensor)):
         raise GradcheckError('gradcheck expects all tensor inputs are dense'
                              ' when check_sparse_nnz is set to False and masked is set to True.')
@@ -1194,12 +1195,13 @@ def _gradcheck_real_imag(gradcheck_fn, func, func_out, tupled_inputs, outputs, e
                 _test_undefined_forward_mode(func, outputs, tupled_inputs)
 
 def _slow_gradcheck(func, func_out, tupled_inputs, outputs, eps, rtol, atol, check_grad_dtypes,
-                    nondet_tol, *, use_forward_ad=False, complex_indices=None, test_imag=False, masked=False):
+                    nondet_tol, *, use_forward_ad=False, complex_indices=None, test_imag=False):
     func_out = _as_tuple(func_out)
     if not outputs:
         return _check_no_differentiable_outputs(func, tupled_inputs, func_out,
                                                 eps=eps, is_forward_ad=use_forward_ad)
 
+    masked = not torch.sparse.sparse_semantics.is_enabled()
     tupled_inputs_numerical = tupled_inputs if masked else _densify(tupled_inputs)
 
     numerical = _transpose(_get_numerical_jacobian(func, tupled_inputs_numerical, func_out,
@@ -1391,8 +1393,7 @@ def _check_analytical_numerical_equal(all_analytical, all_numerical, complex_ind
 
 
 def _fast_gradcheck(func, func_out, inputs, outputs, eps, rtol,
-                    atol, check_grad_dtypes, nondet_tol, *, use_forward_ad=False, complex_indices=None, test_imag=False,
-                    masked=False):
+                    atol, check_grad_dtypes, nondet_tol, *, use_forward_ad=False, complex_indices=None, test_imag=False):
     # See https://github.com/pytorch/pytorch/issues/53876 for details
     inp_tensors_idx, inp_tensors = _get_inp_tensors(inputs)
     # Backward mode computes v^T * J (VJP)
@@ -1404,6 +1405,7 @@ def _fast_gradcheck(func, func_out, inputs, outputs, eps, rtol,
     # we don't need v for correctness check here as asserted below
     all_v, all_u, all_u_dense = _make_vectors(inp_tensors, outputs, use_forward_ad=use_forward_ad)
 
+    masked = not torch.sparse.sparse_semantics.is_enabled()
     inputs_numerical, all_u_numerical, all_v_numerical = (inputs, all_u, all_v) if masked else _densify((inputs, all_u, all_v))
 
     numerical_vJu = _get_numerical_vJu(func, inputs_numerical, inp_tensors_idx, func_out,
@@ -1450,7 +1452,7 @@ def gradcheck(
     check_forward_ad: bool = False,
     check_backward_ad: bool = True,
     fast_mode: bool = False,
-    masked: bool = False,
+    masked: bool = None,
 ) -> bool:
     r"""Check gradients computed via small finite differences against analytical
     gradients w.r.t. tensors in :attr:`inputs` that are of floating point or complex type
@@ -1528,26 +1530,31 @@ def gradcheck(
         "Setting check_batched_forward_grad=True requires check_forward_ad to be True")
     args = locals().copy()
     args.pop("raise_exception")
-    if not raise_exception:
-        try:
+    args.pop("masked")
+    if masked is None:
+        masked = not torch.sparse.sparse_semantics.is_enabled()
+    with torch.sparse.sparse_semantics(not masked):
+        assert torch.sparse.sparse_semantics.is_enabled() != masked
+        if not raise_exception:
+            try:
+                return _gradcheck_helper(**args)
+            except GradcheckError as e:
+                return False
+        else:
             return _gradcheck_helper(**args)
-        except GradcheckError as e:
-            return False
-    else:
-        return _gradcheck_helper(**args)
 
 
 def _gradcheck_helper(func, inputs, eps, atol, rtol, check_sparse_nnz, nondet_tol, check_undefined_grad,
                       check_grad_dtypes, check_batched_grad, check_batched_forward_grad, check_forward_ad,
-                      check_backward_ad, fast_mode, masked):
+                      check_backward_ad, fast_mode):
     tupled_inputs = _as_tuple(inputs)
-    _check_inputs(tupled_inputs, check_sparse_nnz, masked)
+    _check_inputs(tupled_inputs, check_sparse_nnz)
 
     func_out = func(*tupled_inputs)
     outputs = _differentiable_outputs(func_out)
     _check_outputs(outputs)
 
-    gradcheck_fn = functools.partial(_fast_gradcheck if fast_mode else _slow_gradcheck, masked=masked)
+    gradcheck_fn = _fast_gradcheck if fast_mode else _slow_gradcheck
     _gradcheck_real_imag(gradcheck_fn, func, func_out, tupled_inputs, outputs, eps,
                          rtol, atol, check_grad_dtypes, check_forward_ad=check_forward_ad,
                          check_backward_ad=check_backward_ad, nondet_tol=nondet_tol,
@@ -1588,7 +1595,7 @@ def gradgradcheck(
     check_fwd_over_rev: bool = False,
     check_rev_over_rev: bool = True,
     fast_mode: bool = False,
-    masked: bool = False,
+    masked: bool = None,
 ) -> bool:
     r"""Check gradients of gradients computed via small finite differences
     against analytical gradients w.r.t. tensors in :attr:`inputs` and
