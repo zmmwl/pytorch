@@ -1152,7 +1152,8 @@ module_db: List[ModuleInfo] = [
                    DecorateInfo(unittest.expectedFailure, "TestModule", "test_memory_format",
                                 device_type='cuda', dtypes=[torch.float64]),
                    # Fails with channels last test on MPS backend
-                   DecorateInfo(unittest.expectedFailure, "TestModule", "test_memory_format", device_type='mps'),
+                   DecorateInfo(unittest.expectedFailure, "TestModule", "test_memory_format",
+                                device_type='mps', dtypes=[torch.float32]),
                ),
                decorators=(
                    DecorateInfo(precisionOverride({torch.float32: 1e-04}), 'TestModule', 'test_memory_format'),
@@ -1226,7 +1227,8 @@ module_db: List[ModuleInfo] = [
                    DecorateInfo(unittest.expectedFailure, "TestModule", "test_memory_format", device_type='cuda',
                                 dtypes=[torch.complex32], active_if=TEST_WITH_ROCM),
                    # Fails with channels last test on MPS backend
-                   DecorateInfo(unittest.expectedFailure, "TestModule", "test_memory_format", device_type='mps'),
+                   DecorateInfo(unittest.expectedFailure, "TestModule", "test_memory_format",
+                                device_type='mps', dtypes=[torch.float32]),
                    # Not implemented for chalf on CPU
                    DecorateInfo(unittest.expectedFailure, 'TestModule', 'test_forward',
                                 dtypes=(torch.chalf,), device_type='cpu'),
@@ -1331,7 +1333,8 @@ module_db: List[ModuleInfo] = [
                    DecorateInfo(unittest.expectedFailure, "TestModule", "test_memory_format",
                                 device_type='cuda', dtypes=[torch.float64]),
                    # Fails with channels last test on MPS backend
-                   DecorateInfo(unittest.expectedFailure, "TestModule", "test_memory_format", device_type='mps'),
+                   DecorateInfo(unittest.expectedFailure, "TestModule", "test_memory_format",
+                                device_type='mps', dtypes=[torch.float32]),
                ),
                decorators=(
                    DecorateInfo(precisionOverride({torch.float32: 1e-04}), 'TestModule', 'test_memory_format'),
@@ -1392,7 +1395,8 @@ module_db: List[ModuleInfo] = [
                    DecorateInfo(unittest.expectedFailure, "TestModule", "test_memory_format", device_type='cuda',
                                 dtypes=[torch.float64]),
                    # Fails with channels last test on MPS backend
-                   DecorateInfo(unittest.expectedFailure, "TestModule", "test_memory_format", device_type='mps'),
+                   DecorateInfo(unittest.expectedFailure, "TestModule", "test_memory_format",
+                                device_type='mps', dtypes=[torch.float32]),
                ),
                decorators=(
                    DecorateInfo(precisionOverride({torch.float32: 1e-04}), 'TestModule', 'test_memory_format'),
@@ -1468,7 +1472,7 @@ module_db: List[ModuleInfo] = [
                    DecorateInfo(skipMPS, 'TestModule', dtypes=[torch.float64]),
                    # Failure due to unimplemented op masked_scatter_() on MPS backend
                    DecorateInfo(unittest.expectedFailure, 'TestModule', 'test_non_contiguous_tensors',
-                                device_type='mps'),),
+                                device_type='mps', dtypes=[torch.float32]),),
                ),
     ModuleInfo(torch.nn.Hardswish,
                module_inputs_func=module_inputs_torch_nn_Hardswish,
@@ -1552,22 +1556,20 @@ module_db: List[ModuleInfo] = [
                train_and_eval_differ=True,
                module_inputs_func=partial(module_inputs_torch_nn_RNN_GRU, is_rnn=True),
                skips=(
-                   # Test crashes on MPS backend
-                   DecorateInfo(skipMPS),),
+                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),),
                decorators=rnn_gru_lstm_module_info_decorators
                ),
     ModuleInfo(torch.nn.GRU,
                train_and_eval_differ=True,
                module_inputs_func=partial(module_inputs_torch_nn_RNN_GRU, is_rnn=False),
                skips=(
-                   # Test crashes on MPS backend
-                   DecorateInfo(skipMPS),),
+                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),),
                decorators=rnn_gru_lstm_module_info_decorators),
     ModuleInfo(torch.nn.LSTM,
                train_and_eval_differ=True,
                module_inputs_func=module_inputs_torch_nn_LSTM,
                skips=(
-                   # Test crashes on MPS backend
+                   # LSTM with projections is not currently supported with MPS
                    DecorateInfo(skipMPS),),
                decorators=rnn_gru_lstm_module_info_decorators)
 ]
