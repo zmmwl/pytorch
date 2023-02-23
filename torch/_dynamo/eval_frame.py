@@ -307,9 +307,9 @@ class DisableContext(_TorchDynamoContext):
 def catch_errors_wrapper(callback, hooks: Hooks):
     @functools.wraps(callback)
     def catch_errors(frame, cache_size):
+        # TODO re-add the check and add a test for this
         if (
-            frame.f_lasti >= 0
-            or skipfiles.check(frame.f_code.co_filename)
+            skipfiles.check(frame.f_code.co_filename)
             or config.disable
         ):
             log.debug(f"skipping {frame.f_code.co_name} {frame.f_code.co_filename}")
@@ -373,8 +373,8 @@ class _NullDecorator(contextlib.nullcontext):  # type: ignore[type-arg]
 def check_if_dynamo_supported():
     if sys.platform == "win32":
         raise RuntimeError("Windows not yet supported for torch.compile")
-    if sys.version_info >= (3, 11):
-        raise RuntimeError("Python 3.11+ not yet supported for torch.compile")
+    if sys.version_info >= (3, 12):
+        raise RuntimeError("Python 3.12+ not yet supported for torch.compile")
 
 
 def optimize(

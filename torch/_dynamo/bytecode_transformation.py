@@ -52,6 +52,8 @@ class _NotProvided:
 def create_instruction(name, arg=None, argval=_NotProvided, target=None):
     if argval is _NotProvided:
         argval = arg
+    if not isinstance(arg, int):
+        arg = None
     return Instruction(
         opcode=dis.opmap[name], opname=name, arg=arg, argval=argval, target=target
     )
@@ -63,20 +65,23 @@ def create_jump_absolute(target):
     return create_instruction(inst, target=target)
 
 
-def create_load_global(name, arg, push_null):
+def create_load_global(name, push_null):
     """
     `name` is the name of the global to be loaded.
-    `arg` is the index of `name` in the global name table.
     `push_null` specifies whether or not a NULL should be pushed to the stack
     before the global (Python 3.11+ only).
 
     Python 3.11 changed the LOAD_GLOBAL instruction in that the first bit of
-    the arg specifies whether a NULL should be pushed to the stack before the
-    global. The remaining bits of arg contain the name index. See
-    `create_call_function` for why this NULL is needed.
+    the instruction arg specifies whether a NULL should be pushed to the stack
+    before the global. The remaining bits of the instruction arg contain the
+    name index. See `create_call_function` for why this NULL is needed.
+
+    The instruction's `arg` is actually computed when assembling the bytecode. For
+    For Python 3.11, we use the `arg` field here to keep push_null information.
     """
-    if sys.version_info >= (3, 11):
-        arg = (arg << 1) + push_null
+    arg = 0
+    if sys.version_info >= (3, 11) and push_null:
+        arg = 1
     return create_instruction("LOAD_GLOBAL", arg, name)
 
 
@@ -149,14 +154,6 @@ def create_call_method(nargs):
     return [create_instruction("CALL_METHOD", nargs)]
 
 
-def cell_and_freevars_offset(code, i):
-    if sys.version_info >= (3, 11):
-        if isinstance(code, dict):
-            return i + code["co_nlocals"]
-        return i + code.co_nlocals
-    return i
-
-
 def lnotab_writer(lineno, byteno=0):
     """
     Used to create typing.CodeType.co_lnotab
@@ -212,6 +209,25 @@ def linetable_writer(first_lineno):
         _update(total_bytes - byteno, lineno_delta)
 
     return linetable, update, end
+
+
+def parse_exception_table(code):
+    if sys.version_info >= (3, 11):
+        return dis.parse_exception_table(code)
+    raise RuntimeError("Cannot parse for exception table in Python < 3.11")
+
+def _assemble_varint(n):
+    assert n >= 0
+    b = [n & 63]
+    n >>= 6
+    while n > 0:
+        b[-1] |= 64
+        b.append(n & 63)
+        n >>= 6
+    return bytes(b)
+
+def assemble_exception_table(tab):
+    pass
 
 
 def assemble(instructions: List[Instruction], firstlineno):
@@ -337,28 +353,12 @@ def explicit_super(code: types.CodeType, instructions: List[Instruction]):
             nexti = instructions[idx + 1]
             if nexti.opname in ("CALL_FUNCTION", "PRECALL") and nexti.arg == 0:
                 assert "__class__" in cell_and_free
-                output.append(
-                    create_instruction(
-                        "LOAD_DEREF",
-                        cell_and_freevars_offset(
-                            code, cell_and_free.index("__class__")
-                        ),
-                        "__class__",
-                    )
-                )
+                output.append(create_instruction("LOAD_DEREF", "__class__"))
                 first_var = code.co_varnames[0]
                 if first_var in cell_and_free:
-                    output.append(
-                        create_instruction(
-                            "LOAD_DEREF",
-                            cell_and_freevars_offset(
-                                code, cell_and_free.index(first_var)
-                            ),
-                            first_var,
-                        )
-                    )
+                    output.append(create_instruction("LOAD_DEREF", first_var))
                 else:
-                    output.append(create_instruction("LOAD_FAST", 0, first_var))
+                    output.append(create_instruction("LOAD_FAST", first_var))
                 nexti.arg = 2
                 nexti.argval = 2
                 if nexti.opname == "PRECALL":
@@ -460,11 +460,42 @@ def debug_checks(code):
 
 HAS_LOCAL = set(dis.haslocal)
 HAS_NAME = set(dis.hasname)
+HAS_FREE = set(dis.hasfree)
 
 
-def fix_vars(instructions: List[Instruction], code_options):
-    varnames = {name: idx for idx, name in enumerate(code_options["co_varnames"])}
+def get_const_index(code_options, val):
+    for i, v in enumerate(code_options["co_consts"]):
+        if type(val) is type(v) and val == v:
+            return i
+    return -1
+
+
+def fix_vars(instructions: List[Instruction], code_options, varname_from_oparg=None):
     names = {name: idx for idx, name in enumerate(code_options["co_names"])}
+    if sys.version_info < (3, 11):
+        assert varname_from_oparg is None
+        varnames = {name: idx for idx, name in enumerate(code_options["co_varnames"])}
+        freenames = {
+            name: idx
+            for idx, name in enumerate(
+                code_options["co_cellvars"] + code_options["co_freevars"]
+            )
+        }
+    else:
+        assert callable(varname_from_oparg)
+        allnames = {}
+        for idx in itertools.count():
+            try:
+                name = varname_from_oparg(idx)
+                allnames[name] = idx
+            except IndexError:
+                break
+        varnames = {name: allnames[name] for name in code_options["co_varnames"]}
+        freenames = {
+            name: allnames[name]
+            for name in code_options["co_cellvars"] + code_options["co_freevars"]
+        }
+
     for i in range(len(instructions)):
         if sys.version_info >= (3, 11) and instructions[i].opname == "LOAD_GLOBAL":
             # LOAD_GLOBAL is in HAS_NAME, so instructions[i].arg will be overwritten.
@@ -480,6 +511,12 @@ def fix_vars(instructions: List[Instruction], code_options):
             instructions[i].arg = varnames[instructions[i].argval]
         elif instructions[i].opcode in HAS_NAME:
             instructions[i].arg = names[instructions[i].argval]
+        elif instructions[i].opcode in HAS_FREE:
+            instructions[i].arg = freenames[instructions[i].argval]
+        elif instructions[i].opname == "LOAD_CONST":
+            # cannot use a dictionary since consts may not be hashable
+            instructions[i].arg = get_const_index(code_options, instructions[i].argval)
+            assert instructions[i].arg >= 0
 
         if instructions[i].arg is not None:
             instructions[i].arg = (instructions[i].arg << shift) + push_null
@@ -534,7 +571,14 @@ def transform_code_object(code, transformations, safe=False):
 def clean_and_assemble_instructions(
     instructions: List[Instruction], keys: List[str], code_options: Dict[str, Any]
 ) -> Tuple[List[Instruction], types.CodeType]:
-    fix_vars(instructions, code_options)
+    code_options["co_nlocals"] = len(code_options["co_varnames"])
+
+    varname_from_oparg = None
+    if sys.version_info >= (3, 11):
+        # temporary code object with updated names
+        tmp_code = types.CodeType(*[code_options[k] for k in keys])
+        varname_from_oparg = tmp_code._varname_from_oparg
+    fix_vars(instructions, code_options, varname_from_oparg=varname_from_oparg)
 
     dirty = True
     while dirty:
@@ -551,13 +595,15 @@ def clean_and_assemble_instructions(
         code_options["co_linetable"] = lnotab
 
     code_options["co_code"] = bytecode
-    code_options["co_nlocals"] = len(code_options["co_varnames"])
     code_options["co_stacksize"] = stacksize_analysis(instructions)
     assert set(keys) - {"co_posonlyargcount"} == set(code_options.keys()) - {
         "co_posonlyargcount"
     }
     if sys.version_info >= (3, 11):
         # generated code doesn't contain exceptions, so leave exception table empty
+        # TODO: generated code might look very similar to the original function,
+        # I think in the case where there is a graph break with 0 ops. In this case,
+        # exception table needs to be modified.
         code_options["co_exceptiontable"] = b""
     return instructions, types.CodeType(*[code_options[k] for k in keys])
 

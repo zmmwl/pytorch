@@ -5,6 +5,7 @@ import itertools
 import logging
 import operator
 import re
+import sys
 import traceback
 from dataclasses import dataclass
 from typing import Any, Dict, List, NamedTuple, Optional, OrderedDict, Set, Union
@@ -351,6 +352,7 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
             return proxy
 
     def new_var(self, name="tmp"):
+        # TODO verify code_options modification
         existing = set(self.code_options["co_varnames"])
         for i in itertools.count():
             var = f"___{name}_{i}"
@@ -486,6 +488,26 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
 
         if not all(block.can_restore() for block in tx.block_stack):
             unimplemented("compile_subgraph with block_depth != 0")
+
+        if sys.version_info >= (3, 11):
+            # prefix instructions (Python 3.11+)
+            for inst in tx.prefix_insts:
+                if inst.opname == "MAKE_CELL":
+                    self.add_output_instructions(
+                        [create_instruction("MAKE_CELL", inst.argval)]
+                    )
+                elif inst.opname == "COPY_FREE_VARS":
+                    self.add_output_instructions(
+                        [
+                            create_instruction(
+                                "COPY_FREE_VARS", len(tx.code_options["co_freevars"])
+                            )
+                        ]
+                    )
+                elif inst.opname in ("RETURN_GENERATOR", "RESUME"):
+                    self.add_output_instructions([inst])
+                else:
+                    raise RuntimeError(f"unsupported prefix instruction {inst}")
 
         for block in reversed(tx.block_stack):
             block.exit(tx)
