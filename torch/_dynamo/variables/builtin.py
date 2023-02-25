@@ -195,7 +195,7 @@ class BuiltinVariable(VariableTracker):
 
         # Override table contains: op_fn -> [list of handlers]
         op_handlers = {}
-        for (op, magic_method_names) in itertools.chain(
+        for op, magic_method_names in itertools.chain(
             BuiltinVariable._inplace_binops().items(),
             BuiltinVariable._reversible_binops().items(),
         ):
@@ -355,7 +355,7 @@ class BuiltinVariable(VariableTracker):
             return None
 
         # Return first handler that matches the type checks
-        for ((type1, type2), handler) in handlers[op]:
+        for (type1, type2), handler in handlers[op]:
             if isinstance(a, type1) and isinstance(b, type2):
                 return handler
 
@@ -646,7 +646,6 @@ class BuiltinVariable(VariableTracker):
                 )
                 for i in [a, b]
             ):
-
                 if any([isinstance(val, FakeItemVariable) for val in [a, b]]):
                     return variables.FakeItemVariable.from_tensor_variable(result)
 
@@ -683,7 +682,6 @@ class BuiltinVariable(VariableTracker):
             )
             return SymNodeVariable.create(tx, proxy, None)
         else:
-
             unimplemented(f"unsupported min / max over args {str(a)}, {str(b)}")
 
     call_min = _call_min_max
@@ -1039,6 +1037,17 @@ class BuiltinVariable(VariableTracker):
             return variables.TupleVariable(
                 items, **VariableTracker.propagate(self, obj)
             )
+
+    # neg is a constant fold function, so we only get here if constant fold is not valid
+    def call_neg(self, tx, a):
+        if isinstance(a, SymNodeVariable):
+            return SymNodeVariable.create(
+                tx,
+                (operator.neg)(a.as_proxy()),
+                sym_num=None,
+            )
+        # None no-ops this handler and lets the driving function proceed
+        return None
 
     def call_sorted(self, tx, obj: VariableTracker, **kwargs):
         if (
