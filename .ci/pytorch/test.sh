@@ -963,6 +963,7 @@ elif [[ "${TEST_CONFIG}" == *inductor_timm* && $NUM_TEST_SHARDS -gt 1 ]]; then
     test_inductor_timm_shard cuda $id
   fi
 elif [[ "${TEST_CONFIG}" == *inductor_torchbench* ]]; then
+  install_torchaudio
   install_torchtext
   install_torchvision
   install_filelock
