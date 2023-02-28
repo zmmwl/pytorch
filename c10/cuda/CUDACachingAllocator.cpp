@@ -110,6 +110,8 @@ constexpr size_t kMinLargeAlloc =
 constexpr size_t kRoundLarge = 2097152; // round up large allocations to 2 MiB
 constexpr size_t kRoundUpPowerOfTwoIntervals = 16;
 
+void local_raw_delete(void* ptr);
+
 namespace {
 
 using stream_set = ska::flat_hash_set<cuda::CUDAStream>;
@@ -1445,10 +1447,13 @@ class DeviceCachingAllocator {
    * We checkpoint the state of the private pool after each recording, and then
    * reapply it when we are starting a new recording chain. Additionally, we
    * must free the allocations for any tensors that died between the end of our
-   * previous graph replaying and our new recording (TODO). All of the allocated
+   * previous graph replaying and our new recording. All of the allocated
    * segments that existed in the checkpointed state must still exist in the
-   * pool. There may also exist new segments, which we will free (TODO : link
-   * note [live tensors between iterations] when it exists).
+   * pool. There may also exist new allocated blocks.
+   * (TODO : link note [live tensors between iterations] when it exists). For
+   * every block that is currently allocated but no allocated in the snapshot,
+   * we will return a pointer to their block.
+   *.
    *
    *
    *  ---------------> A ---------------> B ---------------> C
@@ -2337,8 +2342,6 @@ static void uncached_delete(void* ptr) {
   C10_CUDA_CHECK(cudaFree(ptr));
 }
 
-void local_raw_delete(void* ptr);
-
 class NativeCachingAllocator : public CUDAAllocator {
  private:
   std::mutex mutex;
@@ -2404,7 +2407,6 @@ class NativeCachingAllocator : public CUDAAllocator {
     }
     Block* block = get_allocated_block(ptr, true /* remove */);
     if (!block) {
-      // TODO - dont throw on blocks we free'd early on
       TORCH_CHECK(false, "invalid device pointer: ", ptr);
     }
     const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
@@ -2503,20 +2505,27 @@ class NativeCachingAllocator : public CUDAAllocator {
     return device_allocator[device]->getCheckpointState(id);
   }
 
-  void setCheckpointPoolState(int device, std::shared_ptr<AllocatorState> as)
-      override {
+  CheckpointDelta setCheckpointPoolState(
+      int device,
+      std::shared_ptr<AllocatorState> as) override {
     std::shared_ptr<PrivatePoolState> pps =
         std::dynamic_pointer_cast<PrivatePoolState>(as);
 
     TORCH_CHECK(pps, "Expected PrivatePoolState");
 
     auto rr = device_allocator[device]->setCheckpointPoolState(*pps);
+
+    CheckpointDelta cpd;
     for (void* ptr : rr.allocations_freed) {
       get_allocated_block(ptr, /*remove*/ true);
+      cpd.ptrs_freed.push_back(ptr);
     }
     for (Block* block : rr.allocations_created) {
       add_allocated_block(block);
+      cpd.ptrs_allocated.push_back(block->ptr);
     }
+
+    return cpd;
   }
 
   DataPtr allocate(size_t size) const override {
