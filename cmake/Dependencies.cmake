@@ -1354,8 +1354,6 @@ if(USE_DISTRIBUTED AND USE_TENSORPIPE)
     set(TP_BUILD_LIBUV ON CACHE BOOL "" FORCE)
     set(TP_STATIC_OR_SHARED STATIC CACHE STRING "" FORCE)
 
-    # Tensorpipe uses cuda_add_library
-    torch_update_find_cuda_flags()
     add_subdirectory(${PROJECT_SOURCE_DIR}/third_party/tensorpipe)
 
     list(APPEND Caffe2_DEPENDENCY_LIBS tensorpipe)
