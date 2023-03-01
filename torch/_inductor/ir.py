@@ -2706,6 +2706,11 @@ class ExternKernel(InputsKernel):
         args.extend(map(repr, self.constant_args))
         return args
 
+    def cpp_wrapper_codegen_args(self):
+        args = [x.codegen_reference() for x in self.inputs]
+        args.extend(self.cpp_constant_args)
+        return args
+
     def codegen_kwargs(self):
         kwargs = []
         if self.kwargs:
@@ -3671,14 +3676,37 @@ class MKLPackedLinear(ExternKernelAlloc):
         layout,
         inputs,
         constant_args=(),
+        cpp_constant_args=(),
         kernel="torch.ops.mkl._mkl_linear",
     ):
         super().__init__(layout, inputs, constant_args)
         self.kernel = kernel
+        self.cpp_kernel = "mkl::_mkl_linear"
+        self.cpp_kernel_key = "mkl_linear"
+        self.cpp_op_schema = """
+            at::Tensor(
+                const at::Tensor& self,
+                const at::Tensor& mkl_weight_t,
+                const at::Tensor& origin_weight_t,
+                const c10::optional<at::Tensor>& bias_opt,
+                const int64_t prepack_batch_size)"""
+        self.cpp_constant_args = cpp_constant_args
 
     def codegen(self, wrapper):
-        wrapper.writeline(
-            f"{self.get_name()} = {self.kernel}({', '.join(self.codegen_args())})"
+        from torch._inductor.codegen.wrapper import CppWrapperCodeGen
+
+        if isinstance(wrapper, CppWrapperCodeGen):
+            args = self.cpp_wrapper_codegen_args()
+        else:
+            args = self.codegen_args()
+
+        wrapper.generate_fusion_ops_code(
+            self.get_name(),
+            self.kernel,
+            self.cpp_kernel,
+            args,
+            self.cpp_op_schema,
+            self.cpp_kernel_key,
         )
 
     @classmethod
@@ -3693,7 +3721,9 @@ class MKLPackedLinear(ExternKernelAlloc):
         output_stride = make_contiguous_strides_for(output_size)
         inputs = [x, packed_w, orig_w]
         bias = None
+        cpp_bias = "at::Tensor()"
         constant_args = [bias, batch_size]
+        cpp_constant_args = [cpp_bias, str(batch_size)]
 
         return MKLPackedLinear(
             layout=FixedLayout(
@@ -3701,6 +3731,7 @@ class MKLPackedLinear(ExternKernelAlloc):
             ),
             inputs=inputs,
             constant_args=constant_args,
+            cpp_constant_args=cpp_constant_args,
             kernel=kernel,
         )
 
