@@ -15,6 +15,7 @@ from torch._guards import (
     Checkpointable,
     Guard,
     GuardsCheckpointState,
+    Source,
     tracing,
     TracingContext,
 )
@@ -34,6 +35,7 @@ from .guards import GuardBuilder
 from .mutation_guard import is_dynamic_nn_module
 from .side_effects import SideEffects
 from .source import (
+    AttrSource,
     ConstantSource,
     is_constant_source,
     LocalInputSource,
@@ -68,6 +70,7 @@ class OutputGraphState(NamedTuple):
     tracked_fakes: List[TrackedFake]
     guard_state: GuardsCheckpointState
     nn_modules: Optional[Dict[str, torch.nn.Module]]
+    nn_modules_sources: Optional[Dict[str, Source]]
     side_effects: SideEffects
     timestamp: int
 
@@ -219,6 +222,7 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
         # should use original graphargs.
         self.orig_graphargs: List[GraphArg] = self.graphargs
         self.nn_modules: Optional[Dict[str, torch.nn.Module]] = dict()
+        self.nn_modules_sources: Optional[Dict[str, Source]] = dict()
         self.side_effects = SideEffects()
         self.code_options = dict(code_options)
         self.output_instructions: List[Instruction] = []
@@ -278,12 +282,14 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
     def copy_graphstate(self) -> OutputGraphState:
         """Create a checkpoint of the current state by copying everything"""
         assert self.nn_modules is not None
+        assert self.nn_modules_sources is not None
         guards_graph_state = self.tracing_context.guards_context.copy_graphstate()
         state = OutputGraphState(
             list(self.graphargs),
             list(self.tracked_fakes),
             guards_graph_state,
             dict(self.nn_modules),
+            dict(self.nn_modules_sources),
             self.side_effects.clone(),
             self.timestamp,
         )
@@ -297,6 +303,7 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
             self.tracked_fakes,
             guards_state,
             self.nn_modules,
+            self.nn_modules_sources,
             self.side_effects,
             self.timestamp,
         ) = state
@@ -458,6 +465,7 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
 
         # create a new unique name
         name = "_".join(map(str, names))
+        # TODO(voz): Util this!!!
         # e.g. replace abc.xyz[123].qkv with abc.xyz_123.qkv
         name = re.sub(r"\[(\d+)\]", r"_\g<1>", name)
         # e.g. replace abc.xyz_123.qkv with abc_xyz_123_qkv
@@ -469,6 +477,17 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
         for i in itertools.count():
             if name not in self.nn_modules:
                 self.nn_modules[name] = target
+                assert self.nn_modules_sources is not None
+                self.nn_modules_sources[name] = source
+                if isinstance(target, torch.nn.Module):
+                    for n, p in target.named_parameters():
+                        new_source = AttrSource(source, n)
+                        new_name = new_source.name()
+                        self.register_attr_or_module(p, new_name, source=new_source)
+                    for n, p in target.named_buffers():
+                        new_source = AttrSource(source, n)
+                        new_name = new_source.name()
+                        self.register_attr_or_module(p, new_name, source=new_source)
                 return wrap_name(name)
             name = f"{base}_{i}"
 
@@ -670,6 +689,14 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
             # WrapperBackend needs real inputs, for now, to verify correctness
             if config.verify_correctness:
                 compiler_fn = WrapperBackend(compiler_fn, self.example_inputs())
+
+            pos = 0
+            for node in gm.graph.nodes:
+                if node.op == "placeholder":
+                    node.meta["source"] = self.graphargs[pos].source
+                    pos += 1
+
+            gm._name_to_source_map = self.nn_modules_sources
 
             # NOTE: [Real Tensors in Accuracy Evaluation]
             #
