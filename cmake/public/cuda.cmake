@@ -65,10 +65,6 @@ if(NOT CMAKE_CUDA_COMPILER_VERSION STREQUAL CUDAToolkit_VERSION OR
                       "V${CUDAToolkit_VERSION} in '${CUDAToolkit_INCLUDE_DIR}'")
 endif()
 
-if(NOT TARGET CUDA::nvToolsExt)
-  message(FATAL_ERROR "Failed to find nvToolsExt")
-endif()
-
 message(STATUS "Caffe2: CUDA detected: " ${CUDA_VERSION})
 message(STATUS "Caffe2: CUDA nvcc is: " ${CUDA_NVCC_EXECUTABLE})
 message(STATUS "Caffe2: CUDA toolkit directory: " ${CUDA_TOOLKIT_ROOT_DIR})
@@ -137,9 +133,8 @@ if(CUDA_NVRTC_LIB AND NOT CUDA_NVRTC_SHORTHASH)
 endif()
 
 # Create new style imported libraries.
-# Several of these libraries have a hardcoded path if CAFFE2_STATIC_LINK_CUDA
-# is set. This path is where sane CUDA installations have their static
-# libraries installed. This flag should only be used for binary builds, so
+# Several of these libraries are static if CAFFE2_STATIC_LINK_CUDA
+# is set. This flag should only be used for binary builds, so
 # end-users should never have this flag set.
 
 # cuda
@@ -148,7 +143,7 @@ target_link_libraries(caffe2::cuda INTERFACE CUDA::cuda_driver)
 
 # cudart
 add_library(torch::cudart INTERFACE IMPORTED)
-if(CAFFE2_STATIC_LINK_CUDA)
+if(CAFFE2_STATIC_LINK_CUDA OR CUDA_USE_STATIC_CUDA_RUNTIME)
   target_link_libraries(torch::cudart INTERFACE CUDA::cudart_static)
 else()
   target_link_libraries(torch::cudart INTERFACE CUDA::cudart)
@@ -156,24 +151,14 @@ endif()
 
 # nvToolsExt
 add_library(torch::nvtoolsext INTERFACE IMPORTED)
-set_property(
-    TARGET torch::nvtoolsext PROPERTY INTERFACE_LINK_LIBRARIES
-    CUDA::nvToolsExt)
+target_link_libraries(torch::nvtoolsext INTERFACE CUDA::nvToolsExt)
 
 # cublas
-add_library(caffe2::cublas INTERFACE IMPORTED)
+add_library(torch::cublas INTERFACE IMPORTED)
 if(CAFFE2_STATIC_LINK_CUDA AND NOT WIN32)
-    set_property(
-        TARGET caffe2::cublas PROPERTY INTERFACE_LINK_LIBRARIES
-        # NOTE: cublas is always linked dynamically
-        CUDA::cublas CUDA::cublasLt)
-    set_property(
-        TARGET caffe2::cublas APPEND PROPERTY INTERFACE_LINK_LIBRARIES
-        CUDA::cudart_static rt)
+  target_link_libraries(torch::cublas INTERFACE CUDA::cublas_static CUDA::cublasLt_static)
 else()
-    set_property(
-        TARGET caffe2::cublas PROPERTY INTERFACE_LINK_LIBRARIES
-        CUDA::cublas CUDA::cublasLt)
+  target_link_libraries(torch::cublas INTERFACE CUDA::cublas CUDA::cublasLt)
 endif()
 
 # cudnn interface
@@ -227,7 +212,7 @@ endif()
 
 # TensorRT
 if(CAFFE2_USE_TENSORRT)
-  add_library(caffe2::tensorrt UNKNOWN IMPORTED)
+  add_library(caffe2::tensorrt INTERFACE IMPORTED)
   set_property(
       TARGET caffe2::tensorrt PROPERTY IMPORTED_LOCATION
       ${TENSORRT_LIBRARY})
