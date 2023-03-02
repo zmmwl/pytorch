@@ -1,24 +1,34 @@
-import torch
-from typing import Set, Dict, List, Type, Optional, cast, Union
-import sys
 import builtins
-import itertools
-import operator
-import math
+import collections
 import functools
+import itertools
+import logging
+import math
+import operator
+import os
+import sys
+import textwrap
 import threading
+import traceback
 from contextlib import contextmanager
 from functools import lru_cache
-import traceback
-import collections
-import textwrap
-import logging
+from typing import cast, Dict, List, Optional, Set, Type, Union
+
+import torch
 
 # NB: The sym_* functions are used via getattr() and must be imported here.
-from torch import SymInt, SymFloat, SymBool, sym_not, sym_float, sym_max, sym_min  # noqa: F401
+from torch import (  # noqa: F401
+    sym_float,
+    sym_max,
+    sym_min,
+    sym_not,
+    SymBool,
+    SymFloat,
+    SymInt,
+)
 from torch._guards import ShapeGuard, Source
-from torch.utils._sympy.value_ranges import ValueRanges, ValueRangeAnalysis
 from torch.utils._sympy.interp import sympy_interp
+from torch.utils._sympy.value_ranges import ValueRangeAnalysis, ValueRanges
 
 SymTypes = (SymInt, SymFloat, SymBool)
 
@@ -705,6 +715,12 @@ reflectable_magic_methods = {
 
 def error():
     raise AssertionError("shouldn't be hit")
+
+
+def get_debugging_stack():
+    # cut this frame and the caller's frame
+    return ''.join(traceback.format_list(traceback.extract_stack()[:-2]))
+
 
 def floor_ceil_helper(a, fn):
     if isinstance(a, sympy.Mul):
@@ -1786,6 +1802,13 @@ class ShapeEnv:
             # problem
         )
 
+    def _set_replacement(self, a: "sympy.Symbol", expr: "sympy.Expr") -> None:
+        if a not in self.replacements or expr != self.replacements[a]:
+            if torch._dynamo.config.print_specializations and isinstance(expr, (sympy.Integer, sympy.Float)):
+                torch._dynamo.guards.log.warning(f"Specializing {a} to {expr}")
+                torch._dynamo.guards.log.debug(f"Stack when specializing:\n{get_debugging_stack()}")
+            self.replacements[a] = expr
+
     @_lru_cache
     def _find(self, a: "sympy.Symbol") -> "sympy.Expr":
         """
@@ -1799,7 +1822,7 @@ class ShapeEnv:
             return a
         res = self.replacements[a]
         cur_replace = {s: self._find(s) for s in res.free_symbols}
-        self.replacements[a] = self.replacements[a].xreplace(cur_replace)
+        self._set_replacement(a, self.replacements[a].xreplace(cur_replace))
         return self.replacements[a]
 
     @lru_cache(256)
@@ -1839,7 +1862,7 @@ class ShapeEnv:
                 solution = solutions[0][free[0]]
                 if all(t.is_integer for t in sympy.preorder_traversal(solution)):
                     new_var = self._find(solution)
-                    self.replacements[cast(sympy.Symbol, free[0])] = new_var
+                    self._set_replacement(cast(sympy.Symbol, free[0]), new_var)
             except NotImplementedError:
                 pass
             except RecursionError:
@@ -1868,6 +1891,15 @@ class ShapeEnv:
             self.evaluate_expr(eq_expr)
         return self.simplify(expr)
 
+    def _add_guard(self, expr: "sympy.Expr") -> None:
+        stack = get_debugging_stack()
+        guard = ShapeGuard(expr, stack)
+        if os.environ.get("TORCHDYNAMO_PRINT_GUARDS", None) == "1":
+            # reusing flag that prints guards
+            torch._dynamo.guards.log.warning(f"Adding shape guard {expr}")
+            torch._dynamo.guards.log.debug(f"Stack when adding shape guard:\n{stack}")
+        self.guards.append(guard)
+
     @lru_cache(256)
     def evaluate_expr(self, expr: "sympy.Expr", hint=None):
         """
@@ -1892,18 +1924,13 @@ class ShapeEnv:
             # as we will implicitly generate a guard when we match that
             # input against the symbol
 
-        # TODO: optimize this; avoid formatting traces until we need them
-        # NB: drop two frames; evaluate_expr and the Sym* function that
-        # actually called us
         if not self._suppress_guards_tls():
-            stack = ''.join(traceback.format_list(traceback.extract_stack()[:-2]))
             if concrete_val is sympy.true:
-                self.guards.append(ShapeGuard(expr, stack))
+                self._add_guard(expr)
             elif concrete_val is sympy.false:
-                self.guards.append(ShapeGuard(sympy.Not(expr), stack))
+                self._add_guard(sympy.Not(expr))
             else:
-                self.guards.append(
-                    ShapeGuard(sympy.Eq(expr, concrete_val), stack))  # type: ignore[arg-type]
+                self._add_guard(sympy.Eq(expr, concrete_val))  # type: ignore[arg-type]
         return concrete_val
 
 def _should_allocate(user_marked_dynamic, assume_static_by_default):
