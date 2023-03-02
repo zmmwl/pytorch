@@ -842,6 +842,12 @@ def glu(x, dim=-1):
 
 def register_onednn_fusion_ops():
     if torch._C.has_mkldnn:
+        cpu_needs_realized_inputs = [
+            torch.ops.mkldnn._convolution_pointwise,
+            torch.ops.mkldnn._convolution_pointwise_,
+            torch.ops.mkldnn._convolution_transpose_pointwise,
+            torch.ops.mkldnn._linear_pointwise,
+        ]
 
         @register_lowering(torch.ops.mkldnn._convolution_pointwise)
         def convolution_unary(
@@ -982,6 +988,7 @@ def register_onednn_fusion_ops():
             )
 
         if torch._C.has_mkl:
+            cpu_needs_realized_inputs.append(torch.ops.mkl._mkl_linear)
 
             @register_lowering(torch.ops.mkl._mkl_linear)
             def mkl_packed_linear(
@@ -998,6 +1005,7 @@ def register_onednn_fusion_ops():
                     result = add(result, b)
                 return result
 
+        add_needs_realized_inputs(cpu_needs_realized_inputs)
     else:
         pass
 
