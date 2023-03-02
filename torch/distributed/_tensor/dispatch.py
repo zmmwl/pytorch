@@ -149,14 +149,43 @@ def operator_dispatch(
     needs_redistribute = suggested_input_schema is not op_schema
 
     if mesh is not None and mesh.get_coordinate() is None:
-        # if we are on a non-participating device, we simply return
-        # an empty tensor for now.
-        # TODO: what if the op returns a non-tensor value, what if
-        # the op returns a list of tensors, we need to figure out
-        # a consistent way to handle that, and also need to figure
-        # out if we should communicate the result to non-participating
-        # ranks (i.e. a.sum() -> scalar, maybe we should set to 0)
-        local_results = torch.tensor([])
+        # if we are on a non-participating device, we should return
+        # a default value of some type consistent with other
+        # participating devices. This type can be obtained from
+        # the `FunctionSchema` object.
+        def _default_ret_value(arg):
+            match str(arg.type):
+                case ("Tensor" | "torch.Tensor"):
+                    # TODO: how to recover dtype info?
+                    return torch.tensor([])
+                case "bool":
+                    return True
+                case "int":
+                    return 0
+                case "float":
+                    return 0.0
+                case "List[Tensor]":
+                    return [torch.Tensor([])]
+                case _:
+                    # TODO: add more types
+                    # Maybe this better be a warning
+                    raise NotImplementedError(
+                        f"default value for type {arg.type} on non-participating"
+                        f" device is not implemented."
+                    )
+
+        ret_list = op_schema.func_schema.returns
+        if len(ret_list) > 1:
+            local_results = [_default_ret_value(arg) for arg in ret_list]
+        elif len(ret_list) == 1:
+            local_results = _default_ret_value(ret_list[0])
+        else:
+            raise RuntimeError(
+                f"function schema {str(op_schema.func_schema)} returns"
+                f" no value"
+            )
+        # TODO: also need to figure out if we should communicate
+        # the result to non-participating ranks
     else:
         # compute locally with redistribute first if needed
         local_tensor_args = pack_args_kwargs_with_local_tensor(
