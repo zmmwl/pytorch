@@ -18,6 +18,7 @@ import torch.utils._pytree as pytree
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.graph import _PyTreeCodeGen, _PyTreeInfo
 from torch.nn.parallel.distributed import DistributedDataParallel
+
 from .backends.registry import CompilerFn, lookup_backend
 
 from .hooks import Hooks
@@ -140,13 +141,8 @@ def enable_dynamic(enable: bool = True, export: bool = False):
     if not enable:
         yield
         return
-    # If export, we should respect original specialize_int_float flag
-    if export:
-        with config.patch(dynamic_shapes=True):
-            yield
-    else:
-        with config.patch(dynamic_shapes=True, specialize_int_float=False):
-            yield
+    with config.patch(dynamic_shapes=True):
+        yield
 
 
 class _TorchDynamoContext:
@@ -634,7 +630,9 @@ def export(
     flat_args, in_spec = pytree.tree_flatten((args, kwargs))
 
     remove_from_cache(f)
-    with patch(f"{__name__}.most_recent_backend", None):
+    with patch(f"{__name__}.most_recent_backend", None), config.patch(
+        specialize_int_float=True
+    ):
         opt_f = optimize_assert(
             dynamo_normalization_capturing_compiler,
             hooks=Hooks(guard_export_fn=guard_export_print, guard_fail_fn=None),
