@@ -9,7 +9,7 @@ on:
     branches:
       - master
     tags:
-      - 'ciflow/trunk/*'
+      - 'ciflow/periodic/*'
   workflow_dispatch:
 
 env:

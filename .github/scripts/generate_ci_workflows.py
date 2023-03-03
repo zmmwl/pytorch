@@ -34,7 +34,7 @@ class CIFlowConfig:
     def __post_init__(self) -> None:
         if not self.isolated_workflow:
             if LABEL_CIFLOW_PERIODIC not in self.labels:
-                self.labels.add(LABEL_CIFLOW_TRUNK)
+                self.labels.add(LABEL_CIFLOW_PERIODIC)
 
 class Config(TypedDict):
     num_shards: int
