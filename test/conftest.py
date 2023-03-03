@@ -172,7 +172,6 @@ def pytest_terminal_summary(terminalreporter, exitstatus, config):
                     terminalreporter._handle_teardown_sections(rep.nodeid)
     yield
 
-
 @pytest.hookimpl(tryfirst=True)
 def pytest_pycollect_makemodule(module_path, path, parent) -> Module:
     if parent.config.getoption("--use-main-module"):

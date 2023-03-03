@@ -5136,8 +5136,14 @@ class TestQuantizeFx(QuantizationTestCase):
         self.assertEqual(output_observer_map.get("dummy_quant3"), default_fixed_qparams_range_neg1to1_observer)
         self._assertFixedQParamsFakeQuantizeEqual(output_fake_quantize_map.get("dummy_quant3"),
                                                   default_fixed_qparams_range_neg1to1_fake_quant)
-
-
+        del _DEFAULT_FUSION_PATTERNS["dummy_fusion"]
+        del _DEFAULT_QUANTIZATION_PATTERNS["dummy_quant"]
+        del _DEFAULT_QUANTIZATION_PATTERNS["dummy_quant2"]
+        del _DEFAULT_QUANTIZATION_PATTERNS["dummy_quant3"]
+        del _DEFAULT_OUTPUT_OBSERVER_MAP["dummy_quant2"]
+        del _DEFAULT_OUTPUT_OBSERVER_MAP["dummy_quant3"]
+        del _DEFAULT_OUTPUT_FAKE_QUANTIZE_MAP["dummy_quant2"]
+        del _DEFAULT_OUTPUT_FAKE_QUANTIZE_MAP["dummy_quant3"]
 
     def test_reuse_input_qconfig(self):
         class M1(torch.nn.Module):
