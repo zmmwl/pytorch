@@ -9,7 +9,7 @@ on:
     branches:
       - master
     tags:
-      - 'ciflow/periodic/*'
+      - 'ciflow/binaries_conda/*'
   workflow_dispatch:
 
 env:
