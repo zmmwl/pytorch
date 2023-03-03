@@ -252,9 +252,18 @@ def align_inputs(model, inputs, static_input_idxs=()):
 
 @dynamo_utils.dynamo_timed
 def cudagraphify(model, inputs, static_input_idxs=()):
+    from torch._inductor.cudagraph_trees import (
+        cudagraphify_impl as new_cudagraphify_impl,
+    )
+
+    if config.triton.cudagraph_trees:
+        cudagraphify_fn = new_cudagraphify_impl
+    else:
+        cudagraphify_fn = cudagraphify_impl
+
     # if using fake tensors, defer cudagraphs until we get real inputs at runtime
     if not any(isinstance(inp, FakeTensor) for inp in inputs):
-        return cudagraphify_impl(model, inputs, static_input_idxs)
+        return cudagraphify_fn(model, inputs, static_input_idxs)
 
     compiled_fn = None
 
@@ -262,8 +271,7 @@ def cudagraphify(model, inputs, static_input_idxs=()):
         nonlocal compiled_fn
         if compiled_fn is None:
             with dynamo_utils.preserve_rng_state():
-                compiled_fn = cudagraphify_impl(model, new_inputs, static_input_idxs)
-
+                compiled_fn = cudagraphify_fn(model, new_inputs, static_input_idxs)
         return compiled_fn(new_inputs)
 
     return run
@@ -282,27 +290,28 @@ def remove_unaligned_input_idxs(inputs, static_input_idxs):
     return static_input_idxs
 
 
+def static_input(x):
+    """
+    Copy and input while preserving strides
+    """
+    # TODO(jansel): figure out why this version doesn't work:
+    # return torch.empty_strided(x.size(), x.stride(), dtype=x.dtype, device=x.device)
+    needed_size = (
+        sum((shape - 1) * stride for shape, stride in zip(x.size(), x.stride())) + 1
+    )
+    buffer = torch.empty(needed_size, dtype=x.dtype, device=x.device)
+    return torch.as_strided(buffer, x.size(), x.stride())
+
+
 def cudagraphify_impl(model, inputs, static_input_idxs=()):
     """
     Assumes inputs[static_input_idxs[i]] are always the same memory address
     """
     static_input_idxs = remove_unaligned_input_idxs(inputs, static_input_idxs)
 
-    def static_input(x):
-        """
-        Copy and input while preserving strides
-        """
-        # TODO(jansel): figure out why this version doesn't work:
-        # return torch.empty_strided(x.size(), x.stride(), dtype=x.dtype, device=x.device)
-        needed_size = (
-            sum((shape - 1) * stride for shape, stride in zip(x.size(), x.stride())) + 1
-        )
-        buffer = torch.zeros(needed_size, dtype=x.dtype, device=x.device)
-        return torch.as_strided(buffer, x.size(), x.stride())
-
     assert isinstance(inputs, (list, tuple))
     static_inputs = [
-        static_input(x) if idx not in static_input_idxs else x.detach()
+        static_input(x).zero_() if idx not in static_input_idxs else x.detach()
         for idx, x in enumerate(inputs)
     ]
 
