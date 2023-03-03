@@ -1463,7 +1463,8 @@ if(USE_CUDA)
     target_link_libraries(torch_cpu PRIVATE torch::cudart)
   endif()
   target_link_libraries(torch_cuda INTERFACE torch::cudart)
-  target_link_libraries(torch_cuda PUBLIC c10_cuda torch::nvtoolsext)
+  target_link_libraries(torch_cuda PUBLIC c10_cuda)
+  target_link_libraries(torch_cuda PRIVATE torch::nvtoolsext)
 
   target_include_directories(
       torch_cuda INTERFACE $<INSTALL_INTERFACE:include>)
