@@ -126,8 +126,8 @@ jobs:
             cp sccache-v0.3.3-x86_64-apple-darwin/sccache /usr/local/bin/
             rm -rf sccache-v0.3.3-x86_64-apple-darwin*
             sudo chmod +x /usr/local/bin/sccache
-            # echo "SCCACHE_BUCKET=ossci-compiler-cache-circleci-v2" >> "${GITHUB_ENV}"
-            # echo "SCCACHE_S3_KEY_PREFIX=${GITHUB_WORKFLOW}" >> "${GITHUB_ENV}"
+            echo "SCCACHE_GHA_CACHE_TO=catsexperiment-latest" >> "${GITHUB_ENV}"
+            echo "SCCACHE_GHA_CACHE_FROM=catsexperiment-" >> "${GITHUB_ENV}"
 
       - name: Configure Cache Env
         uses: actions/github-script@v6
