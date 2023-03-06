@@ -579,3 +579,11 @@ def get_num_bytes(*args):
         for arg in args
         if isinstance(arg, torch.Tensor)
     )
+
+
+def is_ones(items):
+    return all(x == 1 for x in items)
+
+
+def is_zeros(items):
+    return all(x == 0 for x in items)
