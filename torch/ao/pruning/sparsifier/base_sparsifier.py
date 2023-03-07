@@ -6,8 +6,11 @@ from typing import Any, Dict, Optional, Set, Tuple, List, Type
 import torch
 from torch import nn
 from torch.nn.utils import parametrize
+from torch.nn.utils.parametrize import type_before_parametrizations
 
 from .utils import (
+    module_contains_param,
+    swap_module,
     FakeSparsity,
     get_arg_info_from_tensor_fqn,
     module_to_fqn,
@@ -288,12 +291,33 @@ class BaseSparsifier(abc.ABC):
                 # TODO handle multiple tensor being quantized on a single module, where to store sparse_params?
                 module.sparse_params = sparse_params
 
-    def convert(self):
-        # TODO: Call the torch.ao.utils.convert in here
-        raise NotImplementedError(
-            "`convert` is not implemented. Please, use "
-            "`torch.ao.utils.convert` instead."
-        )
+
+    def convert(self,
+	    module, mapping=None, inplace=False,
+	    parameterization=FakeSparsity):
+        r"""Converts submodules in input module to a different module according to `mapping`
+        by calling `from_dense` method on the target module class
+        Args:
+            module: input module
+            mapping: a dictionary that maps from source module type to target
+                module type, can be overwritten to allow swapping user defined
+                Modules
+            inplace: carry out model transformations in-place, the original module
+                is mutated
+        """
+        if mapping is None:
+            raise NotImplementedError("Need to auto generate mapping ")
+        if not inplace:
+            module = copy.deepcopy(module)
+        reassign = {}
+        for name, mod in module.named_children():
+            if type_before_parametrizations(mod) in mapping and module_contains_param(mod, parameterization):
+                reassign[name] = swap_module(mod, mapping)
+
+        for key, value in reassign.items():
+            module._modules[key] = value
+
+        return module
 
     def step(self, use_path: bool = True) -> None:
         if not self.enable_mask_update:
